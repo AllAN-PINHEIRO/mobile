@@ -6,12 +6,7 @@ async function createUser(data) {
     });
 }
 
-export default {
-    createUser,
-    getAllUsers,
-    deleteUser,
-    updateUser
-};
+
 
 async function getAllUsers() {
     return await prisma.user.findMany();
@@ -29,3 +24,10 @@ async function updateUser(id, data) {
         data
     });
 }
+
+export default {
+    createUser,
+    getAllUsers,
+    deleteUser,
+    updateUser
+};

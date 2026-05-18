@@ -3,11 +3,9 @@ import userService from '../services/userService.js';
 
 /*crio o usuário e retorno o resultado da criação para o cliente*/
 async function create(req, res) {
+    console.log('Requisição recebida:', req.body);
     const user = await userService.createUser(req.body);
-
     res.status(201).json(user);
-
-
 }
 
 /*busco todos os usuários e retorno para o cliente*/
