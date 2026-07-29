@@ -3,6 +3,8 @@ import { useState } from 'react';
 import { useRouter } from 'expo-router';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet } from 'react-native';
 
+import { API_URL } from '@/constants/api';
+
 export default function Cadastro() {
   const router = useRouter();
   const [nome, setNome] = useState('');
@@ -15,7 +17,7 @@ export default function Cadastro() {
       return;
     }
     try {
-      await axios.post('http://192.168.1.10:3000/usuario', {
+      await axios.post(`${API_URL}/usuario`, {
         name: nome,
         email,
         password: senha,

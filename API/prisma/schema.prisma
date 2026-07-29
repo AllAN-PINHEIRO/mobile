@@ -13,9 +13,49 @@ datasource db {
   url = env("DATABASE_URL")
 }
 
-model user {
+model User {
   id       String @id @default(auto()) @map("_id") @db.ObjectId
   name     String
   email    String @unique
   password String
+  bikes    Bike[]
+}
+
+model ModeloBike {
+  id     String @id @default(auto()) @map("_id") @db.ObjectId
+  modelo String @unique
+  marca  String
+  tipo   String
+  bikes  Bike[]
+}
+
+model Bike {
+  id           String     @id @default(auto()) @map("_id") @db.ObjectId
+  apelido      String
+  ano          Int
+  kmAtual      Float      @default(0)
+  userId       String     @db.ObjectId
+  user         User       @relation(fields: [userId], references: [id])
+  modeloBikeId String     @db.ObjectId
+  modeloBike   ModeloBike @relation(fields: [modeloBikeId], references: [id])
+  pecas        Peca[]
+  pedais       Pedal[]
+}
+
+model Peca {
+  id               String    @id @default(auto()) @map("_id") @db.ObjectId
+  nome             String
+  kmInstalacao     Float     @default(0)
+  kmLimite         Float?
+  ultimaManutencao DateTime?
+  bikeId           String    @db.ObjectId
+  bike             Bike      @relation(fields: [bikeId], references: [id])
+}
+
+model Pedal {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  km        Float
+  data      DateTime @default(now())
+  bikeId    String   @db.ObjectId
+  bike      Bike     @relation(fields: [bikeId], references: [id])
 }

@@ -14,6 +14,22 @@ async function getAll(req, res) {
     res.status(200).json(users);
 };
 
+/*verifico as credenciais do usuário e retorno os dados dele (sem a senha) se estiverem corretas*/
+async function login(req, res) {
+    const { email, password } = req.body;
+    if (!email || !password) {
+        return res.status(400).json({ error: 'Email e senha são obrigatórios' });
+    }
+
+    const user = await userService.findUserByEmail(email);
+    if (!user || user.password !== password) {
+        return res.status(401).json({ error: 'Email ou senha inválidos' });
+    }
+
+    const { password: _senha, ...userSemSenha } = user;
+    res.status(200).json(userSemSenha);
+}
+
 
 /*removo um usuário com base no ID fornecido na URL e retorno um status de sucesso para o cliente*/
 async function remove(req, res) {
@@ -31,6 +47,7 @@ async function update(req, res) {
     export default {
         create,
         getAll,
+        login,
         remove,
         update
     };

@@ -1,6 +1,9 @@
+import axios from 'axios';
 import { useState } from 'react';
 import { useRouter } from 'expo-router';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet } from 'react-native';
+
+import { API_URL } from '@/constants/api';
 
 export default function Login() {
   const router = useRouter();
@@ -12,8 +15,21 @@ export default function Login() {
       alert('Preencha todos os campos');
       return;
     }
-    // por enquanto navega direto, depois adicionamos a chamada à API
-    router.push('/(tabs)');
+    try {
+      const response = await axios.post(`${API_URL}/login`, {
+        email,
+        password: senha,
+      });
+      const usuario = response.data;
+      if (usuario.bikes?.length === 0) {
+        router.replace({ pathname: '/onboarding', params: { userId: usuario.id } });
+      } else {
+        router.replace('/(tabs)');
+      }
+    } catch (error: any) {
+      console.log(error?.message);
+      alert('Email ou senha inválidos');
+    }
   }
 
   return (

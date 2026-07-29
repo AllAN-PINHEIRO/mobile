@@ -12,6 +12,13 @@ async function getAllUsers() {
     return await prisma.user.findMany();
 }
 
+async function findUserByEmail(email) {
+    return await prisma.user.findUnique({
+        where: { email },
+        include: { bikes: true }
+    });
+}
+
 async function deleteUser(id) {
     return await prisma.user.delete({
         where: { id }
@@ -28,6 +35,7 @@ async function updateUser(id, data) {
 export default {
     createUser,
     getAllUsers,
+    findUserByEmail,
     deleteUser,
     updateUser
 };
