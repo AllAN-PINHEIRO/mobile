@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, DimensionValue, Dimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 
 // Dados simulados para o design. 
 // Futuramente, esses dados virão da sua API cruzando o odômetro da bike com a tabela de "valores médios".
@@ -13,6 +14,8 @@ const pecasSimuladas = [
 ];
 
 export default function Manutencao() {
+  const router = useRouter()
+  
   
   // mudando statuzinhos massas
   const getStatusSaude = (kmRodado: number, kmLimite: number) => {
@@ -80,6 +83,16 @@ export default function Manutencao() {
         contentContainerStyle={styles.listContainer}
         showsVerticalScrollIndicator={false}
       />
+    
+      <View style={styles.footer}>
+          <TouchableOpacity 
+            style={styles.addButton}
+            onPress={() => router.push('/cadastro-manutencao' as any)}
+            >
+            <Ionicons name="add-circle-outline" size={24} color="#fff" style={{ marginRight: 8 }} />
+            <Text style={styles.addButtonText}>Registrar Manutenção</Text>
+          </TouchableOpacity>
+        </View>
     </View>
   );
 }
@@ -169,5 +182,29 @@ const styles = StyleSheet.create({
   barraProgresso: {
     height: '100%',
     borderRadius: 4,
+  },
+      footer: {
+    position: 'absolute',
+    bottom: 30,
+    left: 20,
+    right: 20,
+  },
+      addButton: {
+    flexDirection: 'row',
+    backgroundColor: '#007AFF',
+    paddingVertical: 16,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#007AFF',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 5,
+  },
+    addButtonText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: 'bold',
   },
 });

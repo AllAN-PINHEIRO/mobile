@@ -64,6 +64,16 @@ export default function TabLayout() {
           ),
         }}
       />
+      <Tabs.Screen
+        name="minhas-bikes"
+        options={{
+          title: 'minhas-bikes',
+          headerShown: false,
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="construct-outline" size={size} color={color} />
+          ),
+        }}
+      />
     </Tabs>
 
   );

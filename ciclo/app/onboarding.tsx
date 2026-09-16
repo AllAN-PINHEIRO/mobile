@@ -22,7 +22,12 @@ type Etapa = 'modelo' | 'marca-tipo' | 'apelido-ano' | 'manutencao' | 'pecas' | 
 
 export default function Onboarding() {
   const router = useRouter();
-  const { userId } = useLocalSearchParams<{ userId: string }>();
+  
+  // Captura o userId e a nova variável "origem" para saber de onde o usuário veio
+  const { userId, origem } = useLocalSearchParams<{ userId: string; origem?: string }>();
+  
+  // Variável que verifica se é um cadastro de uma nova bike vindo da tela de perfil
+  const isNovaBike = origem === 'minhas-bikes';
 
   const [etapa, setEtapa] = useState<Etapa>('modelo');
 
@@ -74,7 +79,6 @@ export default function Onboarding() {
     );
   }
 
-  /*pergunta só o modelo; a existência (ou não) no catálogo decide se pulamos marca/tipo — a consulta fica pronta mesmo com o catálogo vazio hoje, pois no futuro ela vai trazer a média de vida útil das peças daquele modelo*/
   async function handleContinuarModelo() {
     if (!modelo.trim()) {
       alert('Informe o modelo da bike');
@@ -142,7 +146,15 @@ export default function Onboarding() {
         tipo: modeloReaproveitado ? undefined : tipo,
         manutencoes,
       });
-      router.replace('/(tabs)');
+
+      // Lógica de redirecionamento dinâmico
+      if (isNovaBike) {
+        alert('Nova bike cadastrada com sucesso!');
+        router.back(); // Retorna para a tela de Minhas Bikes
+      } else {
+        router.replace('/(tabs)'); // Vai para a Home no primeiro login
+      }
+      
     } catch (error: any) {
       console.log(error?.message);
       alert('Erro ao cadastrar a bike');
@@ -164,7 +176,10 @@ export default function Onboarding() {
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
-      <Text style={styles.title}>Cadastre sua primeira bike</Text>
+      {/* Título dinâmico que muda conforme a origem do usuário */}
+      <Text style={styles.title}>
+        {isNovaBike ? 'Cadastrar Nova Bike' : 'Cadastre sua primeira bike'}
+      </Text>
 
       {etapa === 'modelo' && (
         <View>
