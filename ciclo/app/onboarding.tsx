@@ -2,6 +2,7 @@ import axios from 'axios';
 import { useEffect, useState } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { API_URL } from '@/constants/api';
 
@@ -93,6 +94,7 @@ export default function Onboarding() {
     setVerificandoModelo(true);
     try {
       const response = await axios.get(`${API_URL}/modelos`, { params: { q: modelo.trim() } });
+
       const encontrado: ModeloSugestao | undefined = response.data.find(
         (m: ModeloSugestao) => m.modelo.toLowerCase() === modelo.trim().toLowerCase()
       );
@@ -137,7 +139,7 @@ export default function Onboarding() {
   async function finalizarCadastro(manutencoes: { peca: string; data: string }[]) {
     setEnviando(true);
     try {
-      await axios.post(`${API_URL}/bikes`, {
+      const response = await axios.post(`${API_URL}/bikes`, {
         userId,
         apelido,
         ano: parseInt(ano, 10),
@@ -146,6 +148,12 @@ export default function Onboarding() {
         tipo: modeloReaproveitado ? undefined : tipo,
         manutencoes,
       });
+
+      // Salva o ID da bike na memória local se ainda não existir um configurado
+      const jaTemBike = await AsyncStorage.getItem('@bike_id');
+      if (!jaTemBike) {
+        await AsyncStorage.setItem('@bike_id', String(response.data.id));
+      }
 
       // Lógica de redirecionamento dinâmico
       if (isNovaBike) {

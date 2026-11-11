@@ -40,6 +40,7 @@ model Bike {
   modeloBike   ModeloBike @relation(fields: [modeloBikeId], references: [id])
   pecas        Peca[]
   pedais       Pedal[]
+  manutencoes  HistoricoManutencao[]
 }
 
 model Peca {
@@ -56,6 +57,17 @@ model Pedal {
   id        String   @id @default(auto()) @map("_id") @db.ObjectId
   km        Float
   data      DateTime @default(now())
+  bikeId    String   @db.ObjectId
+  bike      Bike     @relation(fields: [bikeId], references: [id])
+}
+
+model HistoricoManutencao {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  titulo    String
+  descricao String
+  km        Float
+  data      DateTime @default(now())
+  tipo      String   // "rotina" ou "troca"
   bikeId    String   @db.ObjectId
   bike      Bike     @relation(fields: [bikeId], references: [id])
 }

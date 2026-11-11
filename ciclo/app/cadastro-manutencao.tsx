@@ -1,7 +1,10 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import axios from 'axios';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { API_URL } from '@/constants/api';
 
 type TipoManutencao = 'rotina' | 'troca';
 
@@ -12,16 +15,18 @@ export default function CadastroManutencao() {
   
   // Estados para o formulário
   const [data, setData] = useState('');
+  const [kmAtual, setKmAtual] = useState(''); // <-- Novo estado para o KM
   const [descricao, setDescricao] = useState('');
   
   // Estados específicos para "Troca de Peça"
   const [pecaTrocada, setPecaTrocada] = useState('');
   const [marcaNova, setMarcaNova] = useState('');
 
-  function handleSalvar() {
-    // Futuramente, enviaremos os dados para a API aqui
-    if (!data) {
-      alert('Informe a data da manutenção.');
+  const [enviando, setEnviando] = useState(false);
+
+  async function handleSalvar() {
+    if (!data || !kmAtual) {
+      alert('Informe a data e a quilometragem da manutenção.');
       return;
     }
     
@@ -30,15 +35,52 @@ export default function CadastroManutencao() {
       return;
     }
 
-    alert('Manutenção registrada com sucesso!');
-    router.back();
+    setEnviando(true);
+
+    try {
+      // Pega o ID da bike que está ativa no momento (você deve salvar isso no AsyncStorage quando o usuário escolhe a bike na Home/Perfil)
+      const bikeId = await AsyncStorage.getItem('@bike_id'); 
+      
+      if (!bikeId) {
+        alert('Erro: Nenhuma bike selecionada.');
+        setEnviando(false);
+        return;
+      }
+      
+      // Converte a data string DD/MM/AAAA para formato ISO (AAAA-MM-DD)
+      const partesData = data.split('/');
+      let dataIso = new Date().toISOString(); // fallback para hoje
+      if (partesData.length === 3) {
+        dataIso = new Date(`${partesData[2]}-${partesData[1]}-${partesData[0]}T12:00:00Z`).toISOString();
+      }
+
+      const payload = {
+        bikeId,
+        tipo,
+        km: parseFloat(kmAtual),
+        titulo: tipo === 'troca' ? `Troca de ${pecaTrocada}` : 'Manutenção de Rotina',
+        descricao: tipo === 'troca' 
+          ? `Peça: ${pecaTrocada}. Marca: ${marcaNova || 'Não informada'}. ${descricao}` 
+          : descricao,
+        data: dataIso,
+      };
+
+      await axios.post(`${API_URL}/manutencoes`, payload);
+
+      alert('Manutenção registrada com sucesso!');
+      router.back(); // Volta para a tela de histórico, que vai recarregar a lista
+    } catch (error: any) {
+      console.log('Erro ao salvar:', error?.message);
+      alert('Erro ao salvar a manutenção no servidor.');
+    } finally {
+      setEnviando(false);
+    }
   }
 
   return (
     <View style={styles.container}>
-      {/* Cabeçalho */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+        <TouchableOpacity onPress={() => router.back()} style={styles.backButton} disabled={enviando}>
           <Ionicons name="arrow-back" size={24} color="#333" />
         </TouchableOpacity>
         <Text style={styles.title}>Nova Manutenção</Text>
@@ -47,78 +89,74 @@ export default function CadastroManutencao() {
 
       <ScrollView contentContainerStyle={styles.scrollContent}>
         
-        
         <View style={styles.selectorContainer}>
           <TouchableOpacity 
             style={[styles.selectorButton, tipo === 'rotina' && styles.selectorButtonActive]}
             onPress={() => setTipo('rotina')}
           >
-            <Text style={[styles.selectorText, tipo === 'rotina' && styles.selectorTextActive]}>
-              Manutenção de Rotina
-            </Text>
+            <Text style={[styles.selectorText, tipo === 'rotina' && styles.selectorTextActive]}>Rotina</Text>
           </TouchableOpacity>
           <TouchableOpacity 
             style={[styles.selectorButton, tipo === 'troca' && styles.selectorButtonActive]}
             onPress={() => setTipo('troca')}
           >
-            <Text style={[styles.selectorText, tipo === 'troca' && styles.selectorTextActive]}>
-              Troca de Peça
-            </Text>
+            <Text style={[styles.selectorText, tipo === 'troca' && styles.selectorTextActive]}>Troca de Peça</Text>
           </TouchableOpacity>
         </View>
 
-        
-        <Text style={styles.label}>Data do Serviço</Text>
-        <TextInput
-          style={styles.input}
-          placeholder="DD/MM/AAAA"
-          value={data}
-          onChangeText={setData}
-          keyboardType="numbers-and-punctuation"
-        />
-
+        <View style={styles.row}>
+          <View style={styles.flex1}>
+            <Text style={styles.label}>Data</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="DD/MM/AAAA"
+              value={data}
+              onChangeText={setData}
+              keyboardType="numbers-and-punctuation"
+            />
+          </View>
+          <View style={{ width: 15 }} />
+          <View style={styles.flex1}>
+            <Text style={styles.label}>KM da Bike</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Ex: 1250"
+              value={kmAtual}
+              onChangeText={setKmAtual}
+              keyboardType="numeric"
+            />
+          </View>
+        </View>
         
         {tipo === 'troca' ? (
           <View style={styles.cardDestaque}>
             <Text style={styles.labelDestaque}>O que foi trocado?</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Ex: Corrente, Pastilha de Freio..."
-              value={pecaTrocada}
-              onChangeText={setPecaTrocada}
-            />
-            
+            <TextInput style={styles.input} placeholder="Ex: Corrente, Pastilha..." value={pecaTrocada} onChangeText={setPecaTrocada} />
             <Text style={styles.labelDestaque}>Marca / Modelo Novo (Opcional)</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Ex: Shimano HG53"
-              value={marcaNova}
-              onChangeText={setMarcaNova}
-            />
+            <TextInput style={styles.input} placeholder="Ex: Shimano HG53" value={marcaNova} onChangeText={setMarcaNova} />
           </View>
         ) : (
           <View style={styles.dicaContainer}>
             <Ionicons name="information-circle-outline" size={20} color="#666" />
-            <Text style={styles.dicaText}>
-              Use a opção "Rotina" para limpezas, calibração, aplicação de óleo ou regulagens gerais onde nenhuma peça nova foi instalada.
-            </Text>
+            <Text style={styles.dicaText}>Use para limpezas, calibração ou regulagens gerais sem troca de peças.</Text>
           </View>
         )}
 
-        <Text style={styles.label}>Descrição do Serviço</Text>
+        <Text style={styles.label}>Descrição / Observações</Text>
         <TextInput
           style={[styles.input, styles.textArea]}
-          placeholder={tipo === 'rotina' ? "Ex: Lubrificação da corrente e calibragem." : "Motivo da troca ou observações extras."}
+          placeholder={tipo === 'rotina' ? "Ex: Lubrificação da corrente." : "Motivo da troca."}
           value={descricao}
           onChangeText={setDescricao}
-          multiline
-          numberOfLines={4}
-          textAlignVertical="top"
+          multiline numberOfLines={4} textAlignVertical="top"
         />
 
-        {/*  Salvar */}
-        <TouchableOpacity style={styles.saveButton} onPress={handleSalvar}>
-          <Text style={styles.saveButtonText}>Salvar Registro</Text>
+        <TouchableOpacity style={styles.saveButton} onPress={handleSalvar} disabled={enviando}>
+          {enviando ? (
+             <ActivityIndicator color="#fff" />
+          ) : (
+             <Text style={styles.saveButtonText}>Salvar Registro</Text>
+          )}
         </TouchableOpacity>
 
       </ScrollView>
@@ -137,7 +175,9 @@ const styles = StyleSheet.create({
   selectorButtonActive: { backgroundColor: '#fff', shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2, elevation: 2 },
   selectorText: { color: '#666', fontWeight: '600' },
   selectorTextActive: { color: '#007AFF', fontWeight: 'bold' },
-  label: { fontSize: 16, fontWeight: 'bold', color: '#333', marginBottom: 8, marginTop: 10 },
+  row: { flexDirection: 'row', justifyContent: 'space-between' },
+  flex1: { flex: 1 },
+  label: { fontSize: 16, fontWeight: 'bold', color: '#333', marginBottom: 8 },
   input: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#ccc', borderRadius: 8, padding: 15, marginBottom: 15, fontSize: 16 },
   textArea: { height: 100 },
   cardDestaque: { backgroundColor: '#E5F1FF', padding: 15, borderRadius: 12, marginBottom: 15, borderWidth: 1, borderColor: '#B3D4FF' },
