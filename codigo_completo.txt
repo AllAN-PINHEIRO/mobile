@@ -1,0 +1,2219 @@
+﻿
+--- C:\Deenvolvimento\ifba\desenvolvimento\PI\ciclo\mobile\API\prisma\schema.prisma ---
+
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mongodb"
+  url = env("DATABASE_URL")
+}
+
+model User {
+  id       String @id @default(auto()) @map("_id") @db.ObjectId
+  name     String
+  email    String @unique
+  password String
+  bikes    Bike[]
+}
+
+model ModeloBike {
+  id     String @id @default(auto()) @map("_id") @db.ObjectId
+  modelo String @unique
+  marca  String
+  tipo   String
+  bikes  Bike[]
+}
+
+model Bike {
+  id           String     @id @default(auto()) @map("_id") @db.ObjectId
+  apelido      String
+  ano          Int
+  kmAtual      Float      @default(0)
+  userId       String     @db.ObjectId
+  user         User       @relation(fields: [userId], references: [id])
+  modeloBikeId String     @db.ObjectId
+  modeloBike   ModeloBike @relation(fields: [modeloBikeId], references: [id])
+  pecas        Peca[]
+  pedais       Pedal[]
+}
+
+model Peca {
+  id               String    @id @default(auto()) @map("_id") @db.ObjectId
+  nome             String
+  kmInstalacao     Float     @default(0)
+  kmLimite         Float?
+  ultimaManutencao DateTime?
+  bikeId           String    @db.ObjectId
+  bike             Bike      @relation(fields: [bikeId], references: [id])
+}
+
+model Pedal {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  km        Float
+  data      DateTime @default(now())
+  bikeId    String   @db.ObjectId
+  bike      Bike     @relation(fields: [bikeId], references: [id])
+}
+
+--- C:\Deenvolvimento\ifba\desenvolvimento\PI\ciclo\mobile\API\src\controllers\bikeController.js ---
+
+import bikeService from '../services/bikeService.js';
+/* Este arquivo contÃ©m os controladores relacionados Ã s bikes dos usuÃ¡rios */
+
+/*busco as bikes de um usuÃ¡rio, usado para saber se ele jÃ¡ passou pelo onboarding*/
+async function getByUser(req, res) {
+    const bikes = await bikeService.getBikesByUserId(req.params.userId);
+    res.status(200).json(bikes);
+}
+
+/*crio a primeira bike do usuÃ¡rio, com o modelo e a manutenÃ§Ã£o inicial informados no onboarding*/
+async function create(req, res) {
+    const { userId, apelido, ano, modelo, marca, tipo, manutencoes } = req.body;
+    if (!userId || !apelido || !ano || !modelo) {
+        return res.status(400).json({ error: 'userId, apelido, ano e modelo sÃ£o obrigatÃ³rios' });
+    }
+
+    try {
+        const bike = await bikeService.createBike({ userId, apelido, ano, modelo, marca, tipo, manutencoes });
+        res.status(201).json(bike);
+    } catch (error) {
+        res.status(400).json({ error: error.message });
+    }
+}
+
+export default {
+    getByUser,
+    create
+};
+
+--- C:\Deenvolvimento\ifba\desenvolvimento\PI\ciclo\mobile\API\src\controllers\modeloBikeController.js ---
+
+import modeloBikeService from '../services/modeloBikeService.js';
+/* Este arquivo contÃ©m os controladores relacionados ao catÃ¡logo de modelos de bike */
+
+/*busco modelos que contenham o termo digitado, usado no autocomplete do app*/
+async function search(req, res) {
+    const termo = req.query.q || '';
+    if (!termo) {
+        return res.status(200).json([]);
+    }
+
+    const modelos = await modeloBikeService.searchModelos(termo);
+    res.status(200).json(modelos);
+}
+
+export default {
+    search
+};
+
+--- C:\Deenvolvimento\ifba\desenvolvimento\PI\ciclo\mobile\API\src\controllers\usercontroller.js ---
+
+import userService from '../services/userService.js';
+/* Este arquivo contÃ©m os controladores relacionados aos usuÃ¡rios, que recebem as requisiÃ§Ãµes e interagem com os serviÃ§os para processar os dados */
+
+/*crio o usuÃ¡rio e retorno o resultado da criaÃ§Ã£o para o cliente*/
+async function create(req, res) {
+    console.log('RequisiÃ§Ã£o recebida:', req.body);
+    const user = await userService.createUser(req.body);
+    res.status(201).json(user);
+}
+
+/*busco todos os usuÃ¡rios e retorno para o cliente*/
+async function getAll(req, res) {
+    const users = await userService.getAllUsers();
+    res.status(200).json(users);
+};
+
+/*verifico as credenciais do usuÃ¡rio e retorno os dados dele (sem a senha) se estiverem corretas*/
+async function login(req, res) {
+    const { email, password } = req.body;
+    if (!email || !password) {
+        return res.status(400).json({ error: 'Email e senha sÃ£o obrigatÃ³rios' });
+    }
+
+    const user = await userService.findUserByEmail(email);
+    if (!user || user.password !== password) {
+        return res.status(401).json({ error: 'Email ou senha invÃ¡lidos' });
+    }
+
+    const { password: _senha, ...userSemSenha } = user;
+    res.status(200).json(userSemSenha);
+}
+
+
+/*removo um usuÃ¡rio com base no ID fornecido na URL e retorno um status de sucesso para o cliente*/
+async function remove(req, res) {
+    await userService.deleteUser(req.params.id);
+
+    res.status(204).send();
+}
+
+/*atualizo um usuÃ¡rio com base no ID fornecido na URL e nos dados fornecidos no corpo da requisiÃ§Ã£o, e retorno o usuÃ¡rio atualizado para o cliente*/
+async function update(req, res) {
+    const user = await userService.updateUser(req.params.id, req.body);
+    res.status(200).json(user);
+}
+
+    export default {
+        create,
+        getAll,
+        login,
+        remove,
+        update
+    };
+
+--- C:\Deenvolvimento\ifba\desenvolvimento\PI\ciclo\mobile\API\src\lib\prisma.js ---
+
+import pkg from '@prisma/client';
+
+const { PrismaClient } = pkg;
+
+const prisma = new PrismaClient();
+
+export default prisma;
+
+--- C:\Deenvolvimento\ifba\desenvolvimento\PI\ciclo\mobile\API\src\routes\bikeRoutes.js ---
+
+import { Router } from 'express';
+import bikeController from '../controllers/bikeController.js';
+
+/* Este arquivo define as rotas relacionadas Ã s bikes dos usuÃ¡rios */
+const router = Router();
+
+router.get('/bikes/usuario/:userId', bikeController.getByUser);
+
+router.post('/bikes', bikeController.create);
+
+export default router;
+
+--- C:\Deenvolvimento\ifba\desenvolvimento\PI\ciclo\mobile\API\src\routes\modeloBikeRoutes.js ---
+
+import { Router } from 'express';
+import modeloBikeController from '../controllers/modeloBikeController.js';
+
+/* Este arquivo define as rotas relacionadas ao catÃ¡logo de modelos de bike */
+const router = Router();
+
+router.get('/modelos', modeloBikeController.search);
+
+export default router;
+
+--- C:\Deenvolvimento\ifba\desenvolvimento\PI\ciclo\mobile\API\src\routes\userRoutes.js ---
+
+import { Router } from 'express';
+import userController from '../controllers/userController.js';
+
+/* Este arquivo define as rotas relacionadas aos usuÃ¡rios e as associa aos controladores correspondentes */
+const router = Router();
+
+router.post('/usuario', userController.create);
+
+router.post('/login', userController.login);
+
+router.get('/usuario', userController.getAll);
+
+router.delete('/usuario/:id', userController.remove);
+
+router.put('/usuario/:id', userController.update);
+
+export default router;
+
+--- C:\Deenvolvimento\ifba\desenvolvimento\PI\ciclo\mobile\API\src\services\bikeService.js ---
+
+import prisma from '../lib/prisma.js';
+import modeloBikeService from './modeloBikeService.js';
+/* Este arquivo contÃ©m os serviÃ§os relacionados Ã s bikes dos usuÃ¡rios */
+
+async function getBikesByUserId(userId) {
+    return await prisma.bike.findMany({
+        where: { userId },
+        include: { modeloBike: true, pecas: true }
+    });
+}
+
+/*crio a bike do usuÃ¡rio reaproveitando ou cadastrando o modelo no catÃ¡logo, e jÃ¡ registro as peÃ§as com manutenÃ§Ã£o recente informadas no onboarding*/
+async function createBike({ userId, apelido, ano, modelo, marca, tipo, manutencoes }) {
+    const modeloBike = await modeloBikeService.findOrCreateModelo({ modelo, marca, tipo });
+
+    return await prisma.bike.create({
+        data: {
+            apelido,
+            ano,
+            userId,
+            modeloBikeId: modeloBike.id,
+            pecas: manutencoes?.length
+                ? {
+                      create: manutencoes.map((m) => ({
+                          nome: m.peca,
+                          ultimaManutencao: new Date(m.data)
+                      }))
+                  }
+                : undefined
+        },
+        include: { modeloBike: true, pecas: true }
+    });
+}
+
+export default {
+    getBikesByUserId,
+    createBike
+};
+
+--- C:\Deenvolvimento\ifba\desenvolvimento\PI\ciclo\mobile\API\src\services\modeloBikeService.js ---
+
+import prisma from '../lib/prisma.js';
+/* Este arquivo contÃ©m os serviÃ§os relacionados ao catÃ¡logo de modelos de bike, compartilhado entre todos os usuÃ¡rios */
+
+async function searchModelos(termo) {
+    return await prisma.modeloBike.findMany({
+        where: {
+            modelo: { contains: termo, mode: 'insensitive' }
+        },
+        take: 10
+    });
+}
+
+async function findModeloByNome(nome) {
+    return await prisma.modeloBike.findFirst({
+        where: {
+            modelo: { equals: nome, mode: 'insensitive' }
+        }
+    });
+}
+
+async function findOrCreateModelo({ modelo, marca, tipo }) {
+    const existente = await findModeloByNome(modelo);
+    if (existente) return existente;
+
+    if (!marca || !tipo) {
+        throw new Error('marca e tipo sÃ£o obrigatÃ³rios para cadastrar um novo modelo');
+    }
+
+    return await prisma.modeloBike.create({
+        data: { modelo, marca, tipo }
+    });
+}
+
+export default {
+    searchModelos,
+    findModeloByNome,
+    findOrCreateModelo
+};
+
+--- C:\Deenvolvimento\ifba\desenvolvimento\PI\ciclo\mobile\API\src\services\userService.js ---
+
+import prisma from '../lib/prisma.js';
+/* Este arquivo contÃ©m os serviÃ§os relacionados aos usuÃ¡rios, que interagem com o banco de dados para realizar operaÃ§Ãµes como criaÃ§Ã£o e consulta de usuÃ¡rios */
+async function createUser(data) {
+    return await prisma.user.create({
+        data
+    });
+}
+
+
+
+async function getAllUsers() {
+    return await prisma.user.findMany();
+}
+
+async function findUserByEmail(email) {
+    return await prisma.user.findUnique({
+        where: { email },
+        include: { bikes: true }
+    });
+}
+
+async function deleteUser(id) {
+    return await prisma.user.delete({
+        where: { id }
+    });
+}
+
+async function updateUser(id, data) {
+    return await prisma.user.update({
+        where: { id },
+        data
+    });
+}
+
+export default {
+    createUser,
+    getAllUsers,
+    findUserByEmail,
+    deleteUser,
+    updateUser
+};
+
+--- C:\Deenvolvimento\ifba\desenvolvimento\PI\ciclo\mobile\API\src\server.js ---
+
+import express from 'express';
+import userRoutes from './routes/userRoutes.js';
+import modeloBikeRoutes from './routes/modeloBikeRoutes.js';
+import bikeRoutes from './routes/bikeRoutes.js';
+/* Este arquivo contÃ©m a configuraÃ§Ã£o do servidor Express e a definiÃ§Ã£o das rotas */
+const app = express();
+
+app.use(express.json());
+
+app.use(userRoutes);
+app.use(modeloBikeRoutes);
+app.use(bikeRoutes);
+
+app.listen(3000, () => {
+    console.log('Servidor rodando');
+});
+
+--- C:\Deenvolvimento\ifba\desenvolvimento\PI\ciclo\mobile\API\prisma.config.ts ---
+
+
+// This file was generated by Prisma and assumes you have installed the following:
+// npm install --save-dev prisma dotenv
+import "dotenv/config";
+import { defineConfig, env } from "prisma/config";
+
+export default defineConfig({
+  schema: "prisma/schema.prisma",
+  migrations: {
+    path: "prisma/migrations",
+  },
+  engine: "classic",
+  datasource: {
+    url: env("DATABASE_URL"),
+  },
+});
+
+--- C:\Deenvolvimento\ifba\desenvolvimento\PI\ciclo\mobile\ciclo\app\(tabs)\historico.tsx ---
+
+import React from 'react';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
+
+// Dados simulados. Futuramente, isso virÃ¡  de manutenÃ§Ãµes no banco de dados.
+const historicoSimulado = [
+  {
+    id: '1',
+    data: '10 Set 2026',
+    titulo: 'RevisÃ£o Geral',
+    km: 5430,
+    descricao: 'Limpeza completa, lubrificaÃ§Ã£o da relaÃ§Ã£o e regulagem dos freios.',
+    icone: 'build-outline',
+    cor: '#007AFF' // Azul
+  },
+  {
+    id: '2',
+    data: '15 Ago 2026',
+    titulo: 'Troca de Pneu Traseiro',
+    km: 4800,
+    descricao: 'Pneu antigo substitÃºido devido a desgaste excessivo da borracha.',
+    icone: 'disc-outline',
+    cor: '#FF9500' // Laranja
+  },
+  {
+    id: '3',
+    data: '02 Mai 2026',
+    titulo: 'Troca de Corrente',
+    km: 2500,
+    descricao: 'Corrente atingiu o limite de vida Ãºtil (alargamento).',
+    icone: 'link-outline',
+    cor: '#FF3B30' // Vermelho
+  }
+];
+
+export default function Historico() {
+  const router = useRouter()
+  const renderItem = ({ item, index }: { item: any; index: number }) => {
+    const isLast = index === historicoSimulado.length - 1;
+
+    return (
+      <View style={styles.timelineItem}>
+        
+        <View style={styles.timelineGraphic}>
+          <View style={[styles.dot, { backgroundColor: item.cor }]}>
+            <Ionicons name={item.icone as any} size={16} color="#fff" />
+          </View>
+          {!isLast && <View style={styles.line} />}
+        </View>
+
+    
+        <View style={styles.contentColumn}>
+          <Text style={styles.dateText}>{item.data}</Text>
+          
+          <View style={styles.card}>
+            <View style={styles.cardHeader}>
+              <Text style={styles.cardTitle}>{item.titulo}</Text>
+              <View style={styles.kmBadge}>
+                <Text style={styles.kmBadgeText}>{item.km} km</Text>
+              </View>
+            </View>
+            <Text style={styles.cardDescription}>{item.descricao}</Text>
+          </View>
+        </View>
+
+      </View>
+    );
+  };
+
+  return (
+    <View style={styles.container}>
+      <View style={styles.header}>
+        <Text style={styles.title}>HistÃ³rico</Text>
+        <Text style={styles.subtitle}>Linha do tempo das suas manutenÃ§Ãµes.</Text>
+      </View>
+
+      <FlatList
+        data={historicoSimulado}
+        keyExtractor={(item) => item.id}
+        renderItem={renderItem}
+        contentContainerStyle={styles.listContainer}
+        showsVerticalScrollIndicator={false}
+      />
+    </View>
+  );
+}
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#F5F7FA',
+  },
+  header: {
+    paddingTop: 50,
+    paddingHorizontal: 20,
+    paddingBottom: 20,
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#EAEAEA',
+  },
+  title: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  subtitle: {
+    fontSize: 14,
+    color: '#666',
+    marginTop: 4,
+  },
+  listContainer: {
+    padding: 20,
+  },
+  timelineItem: {
+    flexDirection: 'row',
+    marginBottom: 5,
+  },
+  timelineGraphic: {
+    width: 40,
+    alignItems: 'center',
+  },
+  dot: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 2, // Garante que a bolinha fique sobre a linha
+  },
+  line: {
+    flex: 1,
+    width: 2,
+    backgroundColor: '#D1D5DB', // Cor da linha conectora
+    marginTop: -5,
+    marginBottom: -5,
+    zIndex: 1,
+  },
+  contentColumn: {
+    flex: 1,
+    paddingLeft: 10,
+    paddingBottom: 25, // EspaÃ§amento entre os itens
+  },
+  dateText: {
+    fontSize: 13,
+    fontWeight: 'bold',
+    color: '#888',
+    marginBottom: 6,
+    textTransform: 'uppercase',
+  },
+  card: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  cardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 8,
+  },
+  cardTitle: {
+    flex: 1,
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+    paddingRight: 10,
+  },
+  kmBadge: {
+    backgroundColor: '#E5F1FF',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  kmBadgeText: {
+    color: '#007AFF',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  cardDescription: {
+    fontSize: 14,
+    color: '#666',
+    lineHeight: 20,
+  },
+    footer: {
+    position: 'absolute',
+    bottom: 30,
+    left: 20,
+    right: 20,
+  },
+    addButton: {
+    flexDirection: 'row',
+    backgroundColor: '#007AFF',
+    paddingVertical: 16,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#007AFF',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 5,
+  },
+    addButtonText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+});
+
+--- C:\Deenvolvimento\ifba\desenvolvimento\PI\ciclo\mobile\ciclo\app\(tabs)\index.tsx ---
+
+import React from 'react';
+import { View, Text, StyleSheet, ScrollView } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+
+// simulaÃ§Ã£od e dados temporria
+const pecasSimuladas = [
+  { kmRodado: 1200, kmLimite: 2500 },
+  { kmRodado: 4800, kmLimite: 5000 },
+  { kmRodado: 1500, kmLimite: 5000 },
+  { kmRodado: 1200, kmLimite: 1500 },
+  { kmRodado: 3500, kmLimite: 10000 },
+];
+
+export default function Home() {
+  const calcularSaudeGeral = () => {
+    let somaSaude = 0;
+    
+    pecasSimuladas.forEach(peca => {
+      const porcentagemGasta = (peca.kmRodado / peca.kmLimite) * 100;
+      const saudeRestante = Math.max(0, 100 - porcentagemGasta);
+      somaSaude += saudeRestante;
+    });
+
+    const media = somaSaude / pecasSimuladas.length;
+    return media;
+  };
+
+  const saudeMedia = calcularSaudeGeral();
+  const saudeExibicao = saudeMedia.toFixed(0);
+
+
+  let corStatus = '#34C759'; 
+  let textoStatus = 'Bike em Ã“timo Estado';
+
+  if (saudeMedia <= 25) {
+    corStatus = '#FF3B30'; 
+    textoStatus = 'ManutenÃ§Ã£o Urgente';
+  } else if (saudeMedia <= 50) {
+    corStatus = '#FF9500'; 
+    textoStatus = 'AtenÃ§Ã£o NecessÃ¡ria';
+  }
+
+  // OdÃ´metro isso aqui precisa puxar da API do banco de dados pra funfar legal
+  const odometroTotal = 5430;
+  const kmDesdeUltimaManutencao = 1200;
+
+  return (
+    <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+      <View style={styles.header}>
+        <Text style={styles.greeting}>OlÃ¡</Text>
+        <Text style={styles.subtitle}>resumo</Text>
+      </View>
+
+      
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>SaÃºde Geral da Bike</Text>
+        <View style={styles.healthContainer}>
+          <View style={[styles.healthCircle, { borderColor: corStatus }]}>
+            <Text style={[styles.healthPercentage, { color: corStatus }]}>
+              {saudeExibicao}%
+            </Text>
+          </View>
+          <Text style={[styles.healthStatusText, { color: corStatus }]}>
+            {textoStatus}
+          </Text>
+        </View>
+      </View>
+
+      {/* Card de OdÃ´metro */}
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>OdÃ´metro</Text>
+        
+        <View style={styles.odoRow}>
+          <View style={styles.odoItem}>
+            <Ionicons name="speedometer-outline" size={32} color="#007AFF" />
+            <Text style={styles.odoValue}>{odometroTotal} km</Text>
+            <Text style={styles.odoLabel}>Total Rodado</Text>
+          </View>
+          
+          <View style={styles.odoDivider} />
+          
+          <View style={styles.odoItem}>
+            <Ionicons name="build-outline" size={32} color="#FF9500" />
+            <Text style={styles.odoValue}>{kmDesdeUltimaManutencao} km</Text>
+            <Text style={styles.odoLabel}>Desde a Ãºltima revisÃ£o</Text>
+          </View>
+        </View>
+      </View>
+
+    </ScrollView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#F5F7FA',
+  },
+  header: {
+    paddingTop: 60,
+    paddingHorizontal: 20,
+    paddingBottom: 20,
+  },
+  greeting: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  subtitle: {
+    fontSize: 16,
+    color: '#666',
+    marginTop: 5,
+  },
+  card: {
+    backgroundColor: '#fff',
+    marginHorizontal: 20,
+    marginBottom: 20,
+    borderRadius: 16,
+    padding: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  cardTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 15,
+  },
+  healthContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  healthCircle: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    borderWidth: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 10,
+  },
+  healthPercentage: {
+    fontSize: 32,
+    fontWeight: 'bold',
+  },
+  healthStatusText: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  odoRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  odoItem: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  odoDivider: {
+    width: 1,
+    height: '80%',
+    backgroundColor: '#EAEAEA',
+    marginHorizontal: 15,
+  },
+  odoValue: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    color: '#333',
+    marginTop: 8,
+  },
+  odoLabel: {
+    fontSize: 13,
+    color: '#666',
+    textAlign: 'center',
+    marginTop: 4,
+  },
+});
+
+--- C:\Deenvolvimento\ifba\desenvolvimento\PI\ciclo\mobile\ciclo\app\(tabs)\manutencao.tsx ---
+
+import React from 'react';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, DimensionValue, Dimensions } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
+
+// Dados simulados para o design. 
+// Futuramente, esses dados virÃ£o da sua API cruzando o odÃ´metro da bike com a tabela de "valores mÃ©dios".
+const pecasSimuladas = [
+  { id: '1', nome: 'Corrente', kmRodado: 1200, kmLimite: 2500, icone: 'link-outline' },
+  { id: '2', nome: 'Pneu Traseiro', kmRodado: 4800, kmLimite: 5000, icone: 'disc-outline' },
+  { id: '3', nome: 'Pneu Dianteiro', kmRodado: 1500, kmLimite: 5000, icone: 'disc-outline' },
+  { id: '4', nome: 'Pastilha de Freio', kmRodado: 1200, kmLimite: 1500, icone: 'stop-circle-outline' },
+  { id: '5', nome: 'Cassete', kmRodado: 3500, kmLimite: 10000, icone: 'cog-outline' },
+];
+
+export default function Manutencao() {
+  const router = useRouter()
+  
+  
+  // mudando statuzinhos massas
+  const getStatusSaude = (kmRodado: number, kmLimite: number) => {
+    const porcentagemGasta = (kmRodado / kmLimite) * 100;
+    const saudeRestante = Math.max(0, 100 - porcentagemGasta); // Garante que nÃ£o fique negativo
+
+    let cor = '#34C759'; 
+    let status = 'Em bom estado';
+
+    if (saudeRestante <= 15) {
+      cor = '#FF3B30'; 
+      status = 'Troca urgente';
+    } else if (saudeRestante <= 40) {
+      cor = '#FF9500'; 
+      status = 'Planejar troca';
+    }
+
+    return { saudeRestante: saudeRestante.toFixed(0), cor, status };
+  };
+
+  const renderPeca = ({ item }: { item: any }) => {
+    const { saudeRestante, cor, status } = getStatusSaude(item.kmRodado, item.kmLimite);
+
+    return (
+      <View style={styles.card}>
+        <View style={styles.cardHeader}>
+          <View style={styles.nomeContainer}>
+            <Ionicons name={item.icone as any} size={20} color="#555" style={styles.icone} />
+            <Text style={styles.nomePeca}>{item.nome}</Text>
+          </View>
+          <Text style={[styles.statusBadge, { color: cor, borderColor: cor }]}>
+            {status}
+          </Text>
+        </View>
+
+        <View style={styles.infoContainer}>
+          <Text style={styles.infoText}>Uso: {item.kmRodado} / {item.kmLimite} km</Text>
+          <Text style={[styles.porcentagemText, { color: cor }]}>{saudeRestante}% Vida Ãºtil</Text>
+        </View>
+
+        
+      <View style={styles.barraFundo}>
+        <View 
+          style={[
+            styles.barraProgresso, 
+            { width: `${saudeRestante}%` as DimensionValue, backgroundColor: cor }
+          ]} 
+          />
+        </View>
+      </View>
+    );
+  };
+
+  return (
+    <View style={styles.container}>
+      <View style={styles.header}>
+        <Text style={styles.title}>Status das PeÃ§as</Text>
+        <Text style={styles.subtitle}>Acompanhe o desgaste com base na quilometragem.</Text>
+      </View>
+
+      <FlatList
+        data={pecasSimuladas}
+        keyExtractor={(item) => item.id}
+        renderItem={renderPeca}
+        contentContainerStyle={styles.listContainer}
+        showsVerticalScrollIndicator={false}
+      />
+    
+      <View style={styles.footer}>
+          <TouchableOpacity 
+            style={styles.addButton}
+            onPress={() => router.push('/cadastro-manutencao' as any)}
+            >
+            <Ionicons name="add-circle-outline" size={24} color="#fff" style={{ marginRight: 8 }} />
+            <Text style={styles.addButtonText}>Registrar ManutenÃ§Ã£o</Text>
+          </TouchableOpacity>
+        </View>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#F5F7FA',
+  },
+  header: {
+    paddingTop: 50,
+    paddingHorizontal: 20,
+    paddingBottom: 20,
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#EAEAEA',
+  },
+  title: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  subtitle: {
+    fontSize: 14,
+    color: '#666',
+    marginTop: 4,
+  },
+  listContainer: {
+    padding: 20,
+  },
+  card: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 15,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  cardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  nomeContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  icone: {
+    marginRight: 8,
+  },
+  nomePeca: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  statusBadge: {
+    fontSize: 12,
+    fontWeight: '600',
+    borderWidth: 1,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  infoContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  infoText: {
+    fontSize: 13,
+    color: '#666',
+  },
+  porcentagemText: {
+    fontSize: 13,
+    fontWeight: 'bold',
+  },
+  barraFundo: {
+    height: 8,
+    backgroundColor: '#EAEAEA',
+    borderRadius: 4,
+    overflow: 'hidden',
+  },
+  barraProgresso: {
+    height: '100%',
+    borderRadius: 4,
+  },
+      footer: {
+    position: 'absolute',
+    bottom: 30,
+    left: 20,
+    right: 20,
+  },
+      addButton: {
+    flexDirection: 'row',
+    backgroundColor: '#007AFF',
+    paddingVertical: 16,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#007AFF',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 5,
+  },
+    addButtonText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+});
+
+--- C:\Deenvolvimento\ifba\desenvolvimento\PI\ciclo\mobile\ciclo\app\(tabs)\oficinas.tsx ---
+
+import { View, Text, StyleSheet } from 'react-native';
+
+export default function Manutencao() {
+  return (
+    <View style={styles.container}>
+      <Text style={styles.title}>oficinas</Text>
+      <Text style={styles.subtitle}>Aqui fica as oficinas.</Text>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#fff', justifyContent: 'center', alignItems: 'center' },
+  title: { fontSize: 24, fontWeight: 'bold', marginBottom: 10 },
+  subtitle: { fontSize: 16, color: '#666' },
+});
+
+--- C:\Deenvolvimento\ifba\desenvolvimento\PI\ciclo\mobile\ciclo\app\(tabs)\perfil.tsx ---
+
+import React from 'react';
+import { View, Text, StyleSheet, Image, TouchableOpacity } from 'react-native';
+import { useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
+
+export default function Perfil() {
+  const router = useRouter();
+//define um cabeÃ§alho com imagem(mais tarde tenho que substituir para foto do usuario) e cria um menu com botÃ£o para o cadastro de bikes(ainda nÃ£o tenho a tela de cadastro de bikes)
+  return (
+    <View style={styles.container}>
+      {/* cabeÃ§alho */}
+      <View style={styles.header}>
+        <Image 
+          source={{ uri: 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png' }} 
+          style={styles.profileImage} 
+        />
+        <Text style={styles.userName}>Vasco da gama</Text>
+        <Text style={styles.userEmail}>seila@email.com</Text>
+      </View>
+
+      {/* menu */}
+      <View style={styles.menu}>
+        <TouchableOpacity 
+          style={styles.menuButton} 
+          onPress={() => router.push('/minhas-bikes' as any)}
+        >
+          <View style={styles.iconContainer}>
+            <Ionicons name="bicycle-outline" size={24} color="#007AFF" />
+          </View>
+          <Text style={styles.menuText}>Minhas Bikes</Text>
+          <Ionicons name="chevron-forward-outline" size={22} color="#ccc" />
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#F5F7FA', 
+  },
+  header: {
+    alignItems: 'center',
+    paddingVertical: 40,
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#EAEAEA',
+  },
+  profileImage: {
+    width: 120,
+    height: 120,
+    borderRadius: 60, 
+    backgroundColor: '#E1E4E8',
+    marginBottom: 15,
+  },
+  userName: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  userEmail: {
+    fontSize: 16,
+    color: '#666',
+    marginTop: 4,
+  },
+  menu: {
+    marginTop: 30,
+    paddingHorizontal: 20,
+  },
+  menuButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    padding: 16,
+    borderRadius: 12, 
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  iconContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#E5F1FF', 
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 15,
+  },
+  menuText: {
+    flex: 1, 
+    fontSize: 17,
+    fontWeight: '600',
+    color: '#333',
+  },
+});
+
+--- C:\Deenvolvimento\ifba\desenvolvimento\PI\ciclo\mobile\ciclo\app\(tabs)\_layout.tsx ---
+
+import { Tabs } from 'expo-router';
+import React from 'react';
+import { Ionicons } from '@expo/vector-icons';
+
+import { HapticTab } from '@/components/haptic-tab';
+import { IconSymbol } from '@/components/ui/icon-symbol';
+import { Colors } from '@/constants/theme';
+import { useColorScheme } from '@/hooks/use-color-scheme';
+
+export default function TabLayout() {
+  const colorScheme = useColorScheme();
+
+  return (
+    <Tabs
+      screenOptions={{
+        tabBarActiveTintColor: Colors[colorScheme ?? 'light'].tint,
+        headerShown: false,
+        tabBarButton: HapticTab,
+      }}>
+      <Tabs.Screen
+        name="index"
+        options={{
+          title: 'Home',
+          tabBarIcon: ({ color }) => <IconSymbol size={28} name="house.fill" color={color} />,
+        }}
+      />
+      <Tabs.Screen
+        name="manutencao"
+        options={{
+          title: 'ManutenÃ§Ã£o',
+          headerShown: false,
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="construct-outline" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="historico"
+        options={{
+          title: 'historico',
+          headerShown: false,
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="construct-outline" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="oficianas"
+        options={{
+          title: 'oficinas',
+          headerShown: false,
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="construct-outline" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="perfil"
+        options={{
+          title: 'perfil',
+          headerShown: false,
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="construct-outline" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="minhas-bikes"
+        options={{
+          title: 'minhas-bikes',
+          headerShown: false,
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="construct-outline" size={size} color={color} />
+          ),
+        }}
+      />
+    </Tabs>
+
+  );
+}
+
+--- C:\Deenvolvimento\ifba\desenvolvimento\PI\ciclo\mobile\ciclo\app\cadastro-manutencao.tsx ---
+
+import React, { useState } from 'react';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
+
+type TipoManutencao = 'rotina' | 'troca';
+
+export default function CadastroManutencao() {
+  const router = useRouter();
+  
+  const [tipo, setTipo] = useState<TipoManutencao>('rotina');
+  
+  // Estados para o formulÃ¡rio
+  const [data, setData] = useState('');
+  const [descricao, setDescricao] = useState('');
+  
+  // Estados especÃ­ficos para "Troca de PeÃ§a"
+  const [pecaTrocada, setPecaTrocada] = useState('');
+  const [marcaNova, setMarcaNova] = useState('');
+
+  function handleSalvar() {
+    // Futuramente, enviaremos os dados para a API aqui
+    if (!data) {
+      alert('Informe a data da manutenÃ§Ã£o.');
+      return;
+    }
+    
+    if (tipo === 'troca' && !pecaTrocada) {
+      alert('Informe qual peÃ§a foi trocada.');
+      return;
+    }
+
+    alert('ManutenÃ§Ã£o registrada com sucesso!');
+    router.back();
+  }
+
+  return (
+    <View style={styles.container}>
+      {/* CabeÃ§alho */}
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+          <Ionicons name="arrow-back" size={24} color="#333" />
+        </TouchableOpacity>
+        <Text style={styles.title}>Nova ManutenÃ§Ã£o</Text>
+        <View style={{ width: 24 }} />
+      </View>
+
+      <ScrollView contentContainerStyle={styles.scrollContent}>
+        
+        
+        <View style={styles.selectorContainer}>
+          <TouchableOpacity 
+            style={[styles.selectorButton, tipo === 'rotina' && styles.selectorButtonActive]}
+            onPress={() => setTipo('rotina')}
+          >
+            <Text style={[styles.selectorText, tipo === 'rotina' && styles.selectorTextActive]}>
+              ManutenÃ§Ã£o de Rotina
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity 
+            style={[styles.selectorButton, tipo === 'troca' && styles.selectorButtonActive]}
+            onPress={() => setTipo('troca')}
+          >
+            <Text style={[styles.selectorText, tipo === 'troca' && styles.selectorTextActive]}>
+              Troca de PeÃ§a
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        
+        <Text style={styles.label}>Data do ServiÃ§o</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="DD/MM/AAAA"
+          value={data}
+          onChangeText={setData}
+          keyboardType="numbers-and-punctuation"
+        />
+
+        
+        {tipo === 'troca' ? (
+          <View style={styles.cardDestaque}>
+            <Text style={styles.labelDestaque}>O que foi trocado?</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Ex: Corrente, Pastilha de Freio..."
+              value={pecaTrocada}
+              onChangeText={setPecaTrocada}
+            />
+            
+            <Text style={styles.labelDestaque}>Marca / Modelo Novo (Opcional)</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Ex: Shimano HG53"
+              value={marcaNova}
+              onChangeText={setMarcaNova}
+            />
+          </View>
+        ) : (
+          <View style={styles.dicaContainer}>
+            <Ionicons name="information-circle-outline" size={20} color="#666" />
+            <Text style={styles.dicaText}>
+              Use a opÃ§Ã£o "Rotina" para limpezas, calibraÃ§Ã£o, aplicaÃ§Ã£o de Ã³leo ou regulagens gerais onde nenhuma peÃ§a nova foi instalada.
+            </Text>
+          </View>
+        )}
+
+        <Text style={styles.label}>DescriÃ§Ã£o do ServiÃ§o</Text>
+        <TextInput
+          style={[styles.input, styles.textArea]}
+          placeholder={tipo === 'rotina' ? "Ex: LubrificaÃ§Ã£o da corrente e calibragem." : "Motivo da troca ou observaÃ§Ãµes extras."}
+          value={descricao}
+          onChangeText={setDescricao}
+          multiline
+          numberOfLines={4}
+          textAlignVertical="top"
+        />
+
+        {/*  Salvar */}
+        <TouchableOpacity style={styles.saveButton} onPress={handleSalvar}>
+          <Text style={styles.saveButtonText}>Salvar Registro</Text>
+        </TouchableOpacity>
+
+      </ScrollView>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#F5F7FA' },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 50, paddingHorizontal: 20, paddingBottom: 20, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#EAEAEA' },
+  backButton: { padding: 5 },
+  title: { fontSize: 20, fontWeight: 'bold', color: '#333' },
+  scrollContent: { padding: 20 },
+  selectorContainer: { flexDirection: 'row', backgroundColor: '#EAEAEA', borderRadius: 8, padding: 4, marginBottom: 25 },
+  selectorButton: { flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 6 },
+  selectorButtonActive: { backgroundColor: '#fff', shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2, elevation: 2 },
+  selectorText: { color: '#666', fontWeight: '600' },
+  selectorTextActive: { color: '#007AFF', fontWeight: 'bold' },
+  label: { fontSize: 16, fontWeight: 'bold', color: '#333', marginBottom: 8, marginTop: 10 },
+  input: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#ccc', borderRadius: 8, padding: 15, marginBottom: 15, fontSize: 16 },
+  textArea: { height: 100 },
+  cardDestaque: { backgroundColor: '#E5F1FF', padding: 15, borderRadius: 12, marginBottom: 15, borderWidth: 1, borderColor: '#B3D4FF' },
+  labelDestaque: { fontSize: 15, fontWeight: 'bold', color: '#005bb5', marginBottom: 8 },
+  dicaContainer: { flexDirection: 'row', backgroundColor: '#EAEAEA', padding: 15, borderRadius: 8, marginBottom: 20, alignItems: 'center' },
+  dicaText: { flex: 1, marginLeft: 10, color: '#555', fontSize: 13, lineHeight: 18 },
+  saveButton: { backgroundColor: '#007AFF', padding: 16, borderRadius: 12, alignItems: 'center', marginTop: 20, shadowColor: '#007AFF', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 5 },
+  saveButtonText: { color: '#fff', fontWeight: 'bold', fontSize: 18 },
+});
+
+--- C:\Deenvolvimento\ifba\desenvolvimento\PI\ciclo\mobile\ciclo\app\cadastro.tsx ---
+
+import axios from 'axios';
+import { useState } from 'react';
+import { useRouter } from 'expo-router';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet } from 'react-native';
+
+import { API_URL } from '@/constants/api';
+
+export default function Cadastro() {
+  const router = useRouter();
+  const [nome, setNome] = useState('');
+  const [email, setEmail] = useState('');
+  const [senha, setSenha] = useState('');
+
+  async function handleCadastro() {
+    if (!nome || !email || !senha) {
+      alert('Preencha todos os campos');
+      return;
+    }
+    try {
+      await axios.post(`${API_URL}/usuario`, {
+        name: nome,
+        email,
+        password: senha,
+      });
+      alert('UsuÃ¡rio cadastrado com sucesso');
+      router.push('/');
+    } catch (error: any) {
+      console.log(error?.message);
+      alert('Erro ao cadastrar usuÃ¡rio');
+    }
+  }
+
+  return (
+    <View style={styles.container}>
+      <Text style={styles.title}>Cadastro</Text>
+      <TextInput style={styles.input} placeholder="Nome" value={nome} onChangeText={setNome} />
+      <TextInput style={styles.input} placeholder="Email" value={email} onChangeText={setEmail} />
+      <TextInput style={styles.input} placeholder="Senha" value={senha} onChangeText={setSenha} secureTextEntry />
+      <TouchableOpacity style={styles.button} onPress={handleCadastro}>
+        <Text style={styles.buttonText}>Cadastrar</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#fff', justifyContent: 'center', padding: 20 },
+  title: { fontSize: 32, fontWeight: 'bold', marginBottom: 30, textAlign: 'center' },
+  input: { borderWidth: 1, borderColor: '#ccc', borderRadius: 8, padding: 15, marginBottom: 15 },
+  button: { backgroundColor: '#007AFF', padding: 15, borderRadius: 8, alignItems: 'center' },
+  buttonText: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
+});
+
+--- C:\Deenvolvimento\ifba\desenvolvimento\PI\ciclo\mobile\ciclo\app\index.tsx ---
+
+import axios from 'axios';
+import { useState } from 'react';
+import { useRouter } from 'expo-router';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+import { API_URL } from '@/constants/api';
+
+export default function Login() {
+  const router = useRouter();
+  const [email, setEmail] = useState('');
+  const [senha, setSenha] = useState('');
+
+  async function handleLogin() {
+    if (!email || !senha) {
+      alert('Preencha todos os campos');
+      return;
+    }
+    
+    try {
+      // 1. Faz a requisiÃ§Ã£o para a API
+      const response = await axios.post(`${API_URL}/login`, {
+        email,
+        password: senha,
+      });
+      
+      const usuario = response.data;
+      
+      // 2. Salva o ID do usuÃ¡rio na memÃ³ria do celular
+      await AsyncStorage.setItem('@user_id', String(usuario.id));
+      
+      // 3. Verifica se tem bikes e redireciona
+      if (usuario.bikes?.length === 0) {
+        router.replace({ pathname: '/onboarding', params: { userId: usuario.id } });
+      } else {
+        router.replace('/(tabs)');
+      }
+      
+    } catch (error: any) {
+      console.log(error?.message);
+      alert('Email ou senha invÃ¡lidos');
+    }
+  }
+
+  return (
+    <View style={styles.container}>
+      <Text style={styles.title}>Login</Text>
+      <TextInput style={styles.input} placeholder="Email" value={email} onChangeText={setEmail} />
+      <TextInput style={styles.input} placeholder="Senha" value={senha} onChangeText={setSenha} secureTextEntry />
+      <TouchableOpacity style={styles.button} onPress={handleLogin}>
+        <Text style={styles.buttonText}>Entrar</Text>
+      </TouchableOpacity>
+      <TouchableOpacity onPress={() => router.push('/cadastro')}>
+        <Text style={styles.link}>NÃ£o tem conta? Cadastre-se</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#fff', justifyContent: 'center', padding: 20 },
+  title: { fontSize: 32, fontWeight: 'bold', marginBottom: 30, textAlign: 'center' },
+  input: { borderWidth: 1, borderColor: '#ccc', borderRadius: 8, padding: 15, marginBottom: 15 },
+  button: { backgroundColor: '#007AFF', padding: 15, borderRadius: 8, alignItems: 'center', marginBottom: 15 },
+  buttonText: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
+  link: { textAlign: 'center', color: '#007AFF' },
+});
+
+--- C:\Deenvolvimento\ifba\desenvolvimento\PI\ciclo\mobile\ciclo\app\minhas-bikes.tsx ---
+
+import React,{ useEffect, useState } from 'react';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+// Dados simulados
+const bikesSimuladas = [
+  { id: '1', apelido: 'Gravel Explorer', odometro_total: 5430 },
+  { id: '2', apelido: 'MTB Fim de Semana', odometro_total: 1200 },
+];
+
+export default function MinhasBikes() {
+  const router = useRouter();
+  const [userId, setUserId] = useState<string | null>(null);
+
+  useEffect(() => {
+    async function carregarId() {
+      const idSalvo = await AsyncStorage.getItem('@user_id');
+      if (idSalvo) {
+        setUserId(idSalvo);
+      }
+    }
+    carregarId();
+  }, []);
+
+  const renderBike = ({ item }: { item: any }) => (
+    <View style={styles.bikeCard}>
+      <View style={styles.bikeIconContainer}>
+        <Ionicons name="bicycle" size={32} color="#007AFF" />
+      </View>
+      <View style={styles.bikeInfo}>
+        <Text style={styles.bikeName}>{item.apelido}</Text>
+        <Text style={styles.bikeOdometro}>OdÃ´metro: {item.odometro_total} km</Text>
+      </View>
+      <TouchableOpacity style={styles.actionButton}>
+        <Ionicons name="create-outline" size={24} color="#666" />
+      </TouchableOpacity>
+    </View>
+  );
+
+  return (
+    <View style={styles.container}>
+
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+          <Ionicons name="arrow-back" size={24} color="#333" />
+        </TouchableOpacity>
+        <Text style={styles.title}>Minhas Bikes</Text>
+        <View style={{ width: 24 }} /> 
+      </View>
+
+      <FlatList
+        data={bikesSimuladas}
+        keyExtractor={(item) => item.id}
+        renderItem={renderBike}
+        contentContainerStyle={styles.listContainer}
+        showsVerticalScrollIndicator={false}
+        ListEmptyComponent={
+          <Text style={styles.emptyText}>Nenhuma bike cadastrada ainda.</Text>
+        }
+      />
+
+            
+        <View style={styles.footer}>
+                <TouchableOpacity 
+                style={styles.addButton}
+                onPress={() => {
+                    if (userId) {
+                    router.push({ 
+                        pathname: '/onboarding', 
+                        params: { origem: 'minhas-bikes', userId: userId } 
+                    });
+                    } else {
+                    alert('Erro: UsuÃ¡rio nÃ£o identificado. FaÃ§a login novamente.');
+                    }
+                }}
+                >
+                <Ionicons name="add-circle-outline" size={24} color="#fff" style={{ marginRight: 8 }} />
+                <Text style={styles.addButtonText}>Cadastrar Nova Bike</Text>
+            </TouchableOpacity>
+        </View>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#F5F7FA',
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingTop: 50, // Ajuste para descer abaixo da barra de status do celular
+    paddingHorizontal: 20,
+    paddingBottom: 20,
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#EAEAEA',
+  },
+  backButton: {
+    padding: 5,
+  },
+  title: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  listContainer: {
+    padding: 20,
+    paddingBottom: 100, // EspaÃ§o para nÃ£o ficar atrÃ¡s do botÃ£o inferior
+  },
+  bikeCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 15,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  bikeIconContainer: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: '#E5F1FF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 15,
+  },
+  bikeInfo: {
+    flex: 1,
+  },
+  bikeName: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 4,
+  },
+  bikeOdometro: {
+    fontSize: 14,
+    color: '#666',
+  },
+  actionButton: {
+    padding: 10,
+  },
+  emptyText: {
+    textAlign: 'center',
+    color: '#999',
+    marginTop: 40,
+    fontSize: 16,
+  },
+  footer: {
+    position: 'absolute',
+    bottom: 30,
+    left: 20,
+    right: 20,
+  },
+  addButton: {
+    flexDirection: 'row',
+    backgroundColor: '#007AFF',
+    paddingVertical: 16,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#007AFF',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 5,
+  },
+  addButtonText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+});
+
+--- C:\Deenvolvimento\ifba\desenvolvimento\PI\ciclo\mobile\ciclo\app\onboarding.tsx ---
+
+import axios from 'axios';
+import { useEffect, useState } from 'react';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
+
+import { API_URL } from '@/constants/api';
+
+type ModeloSugestao = { id: string; modelo: string; marca: string; tipo: string };
+
+const PECAS_PADRAO = [
+  'Corrente',
+  'Cassete/Coroa',
+  'Pastilhas de Freio',
+  'Pneus/CÃ¢maras',
+  'Amortecedor/SuspensÃ£o',
+  'Rolamentos (Movimento Central)',
+  'Cabos de CÃ¢mbio e Freio',
+  'Correia de TransmissÃ£o',
+];
+
+type Etapa = 'modelo' | 'marca-tipo' | 'apelido-ano' | 'manutencao' | 'pecas' | 'data';
+
+export default function Onboarding() {
+  const router = useRouter();
+  
+  // Captura o userId e a nova variÃ¡vel "origem" para saber de onde o usuÃ¡rio veio
+  const { userId, origem } = useLocalSearchParams<{ userId: string; origem?: string }>();
+  
+  // VariÃ¡vel que verifica se Ã© um cadastro de uma nova bike vindo da tela de perfil
+  const isNovaBike = origem === 'minhas-bikes';
+
+  const [etapa, setEtapa] = useState<Etapa>('modelo');
+
+  const [modelo, setModelo] = useState('');
+  const [marca, setMarca] = useState('');
+  const [tipo, setTipo] = useState('');
+  const [modeloReaproveitado, setModeloReaproveitado] = useState(false);
+  const [sugestoes, setSugestoes] = useState<ModeloSugestao[]>([]);
+  const [verificandoModelo, setVerificandoModelo] = useState(false);
+  const [apelido, setApelido] = useState('');
+  const [ano, setAno] = useState('');
+
+  const [pecasSelecionadas, setPecasSelecionadas] = useState<string[]>([]);
+  const [dataManutencao, setDataManutencao] = useState('');
+  const [enviando, setEnviando] = useState(false);
+
+  useEffect(() => {
+    if (modeloReaproveitado || modelo.trim().length < 2) {
+      setSugestoes([]);
+      return;
+    }
+    const timeout = setTimeout(async () => {
+      try {
+        const response = await axios.get(`${API_URL}/modelos`, { params: { q: modelo.trim() } });
+        setSugestoes(response.data);
+      } catch (error: any) {
+        console.log(error?.message);
+      }
+    }, 400);
+    return () => clearTimeout(timeout);
+  }, [modelo, modeloReaproveitado]);
+
+  function selecionarSugestao(sugestao: ModeloSugestao) {
+    setModelo(sugestao.modelo);
+    setMarca(sugestao.marca);
+    setTipo(sugestao.tipo);
+    setModeloReaproveitado(true);
+    setSugestoes([]);
+  }
+
+  function handleMudarModelo(texto: string) {
+    setModelo(texto);
+    setModeloReaproveitado(false);
+  }
+
+  function togglePeca(peca: string) {
+    setPecasSelecionadas((atual) =>
+      atual.includes(peca) ? atual.filter((p) => p !== peca) : [...atual, peca]
+    );
+  }
+
+  async function handleContinuarModelo() {
+    if (!modelo.trim()) {
+      alert('Informe o modelo da bike');
+      return;
+    }
+
+    if (modeloReaproveitado) {
+      setEtapa('apelido-ano');
+      return;
+    }
+
+    setVerificandoModelo(true);
+    try {
+      const response = await axios.get(`${API_URL}/modelos`, { params: { q: modelo.trim() } });
+      const encontrado: ModeloSugestao | undefined = response.data.find(
+        (m: ModeloSugestao) => m.modelo.toLowerCase() === modelo.trim().toLowerCase()
+      );
+      if (encontrado) {
+        selecionarSugestao(encontrado);
+        setEtapa('apelido-ano');
+      } else {
+        setEtapa('marca-tipo');
+      }
+    } catch (error: any) {
+      console.log(error?.message);
+      alert('Erro ao consultar o catÃ¡logo de modelos');
+    } finally {
+      setVerificandoModelo(false);
+    }
+  }
+
+  function handleContinuarMarcaTipo() {
+    if (!marca || !tipo) {
+      alert('Informe marca e tipo da bike');
+      return;
+    }
+    setEtapa('apelido-ano');
+  }
+
+  function handleContinuarApelidoAno() {
+    if (!apelido || !ano) {
+      alert('Preencha apelido e ano da bike');
+      return;
+    }
+    setEtapa('manutencao');
+  }
+
+  function handleContinuarPecas() {
+    if (pecasSelecionadas.length === 0) {
+      alert('Selecione ao menos uma peÃ§a');
+      return;
+    }
+    setEtapa('data');
+  }
+
+  async function finalizarCadastro(manutencoes: { peca: string; data: string }[]) {
+    setEnviando(true);
+    try {
+      await axios.post(`${API_URL}/bikes`, {
+        userId,
+        apelido,
+        ano: parseInt(ano, 10),
+        modelo,
+        marca: modeloReaproveitado ? undefined : marca,
+        tipo: modeloReaproveitado ? undefined : tipo,
+        manutencoes,
+      });
+
+      // LÃ³gica de redirecionamento dinÃ¢mico
+      if (isNovaBike) {
+        alert('Nova bike cadastrada com sucesso!');
+        router.back(); // Retorna para a tela de Minhas Bikes
+      } else {
+        router.replace('/(tabs)'); // Vai para a Home no primeiro login
+      }
+      
+    } catch (error: any) {
+      console.log(error?.message);
+      alert('Erro ao cadastrar a bike');
+    } finally {
+      setEnviando(false);
+    }
+  }
+
+  function handleConcluirComData() {
+    const partes = dataManutencao.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+    if (!partes) {
+      alert('Informe a data no formato DD/MM/AAAA');
+      return;
+    }
+    const [, dia, mesNum, anoNum] = partes;
+    const dataIso = `${anoNum}-${mesNum}-${dia}`;
+    finalizarCadastro(pecasSelecionadas.map((peca) => ({ peca, data: dataIso })));
+  }
+
+  return (
+    <ScrollView contentContainerStyle={styles.container}>
+      {/* TÃ­tulo dinÃ¢mico que muda conforme a origem do usuÃ¡rio */}
+      <Text style={styles.title}>
+        {isNovaBike ? 'Cadastrar Nova Bike' : 'Cadastre sua primeira bike'}
+      </Text>
+
+      {etapa === 'modelo' && (
+        <View>
+          <TextInput
+            style={styles.input}
+            placeholder="Modelo da bike"
+            value={modelo}
+            onChangeText={handleMudarModelo}
+          />
+          {sugestoes.length > 0 && (
+            <View style={styles.sugestoes}>
+              {sugestoes.map((sugestao) => (
+                <TouchableOpacity
+                  key={sugestao.id}
+                  style={styles.sugestaoItem}
+                  onPress={() => selecionarSugestao(sugestao)}>
+                  <Text>
+                    {sugestao.modelo} ({sugestao.marca} Â· {sugestao.tipo})
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+
+          <TouchableOpacity style={styles.button} onPress={handleContinuarModelo} disabled={verificandoModelo}>
+            <Text style={styles.buttonText}>{verificandoModelo ? 'Verificando...' : 'Continuar'}</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {etapa === 'marca-tipo' && (
+        <View>
+          <TouchableOpacity onPress={() => setEtapa('modelo')}>
+            <Text style={styles.voltar}>â€¹ Voltar</Text>
+          </TouchableOpacity>
+          <Text style={styles.pergunta}>Modelo novo, conte mais sobre ele:</Text>
+          <TextInput style={styles.input} placeholder="Marca" value={marca} onChangeText={setMarca} />
+          <TextInput style={styles.input} placeholder="Tipo (ex: MTB, Speed, Urbana)" value={tipo} onChangeText={setTipo} />
+          <TouchableOpacity style={styles.button} onPress={handleContinuarMarcaTipo}>
+            <Text style={styles.buttonText}>Continuar</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {etapa === 'apelido-ano' && (
+        <View>
+          <TouchableOpacity onPress={() => setEtapa(modeloReaproveitado ? 'modelo' : 'marca-tipo')}>
+            <Text style={styles.voltar}>â€¹ Voltar</Text>
+          </TouchableOpacity>
+          <TextInput style={styles.input} placeholder="Apelido da bike" value={apelido} onChangeText={setApelido} />
+          <TextInput
+            style={styles.input}
+            placeholder="Ano"
+            value={ano}
+            onChangeText={setAno}
+            keyboardType="numeric"
+          />
+          <TouchableOpacity style={styles.button} onPress={handleContinuarApelidoAno}>
+            <Text style={styles.buttonText}>Continuar</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {etapa === 'manutencao' && (
+        <View>
+          <Text style={styles.pergunta}>VocÃª fez manutenÃ§Ã£o recentemente nessa bike?</Text>
+          <TouchableOpacity style={styles.button} onPress={() => setEtapa('pecas')}>
+            <Text style={styles.buttonText}>Sim</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.button, styles.buttonSecundario]}
+            onPress={() => finalizarCadastro([])}
+            disabled={enviando}>
+            <Text style={styles.buttonText}>NÃ£o</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {etapa === 'pecas' && (
+        <View>
+          <Text style={styles.pergunta}>Em quais peÃ§as?</Text>
+          {PECAS_PADRAO.map((peca) => {
+            const selecionada = pecasSelecionadas.includes(peca);
+            return (
+              <TouchableOpacity
+                key={peca}
+                style={[styles.pecaItem, selecionada && styles.pecaItemSelecionada]}
+                onPress={() => togglePeca(peca)}>
+                <Text style={selecionada ? styles.pecaTextoSelecionado : undefined}>{peca}</Text>
+              </TouchableOpacity>
+            );
+          })}
+          <TouchableOpacity style={styles.button} onPress={handleContinuarPecas}>
+            <Text style={styles.buttonText}>Continuar</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {etapa === 'data' && (
+        <View>
+          <Text style={styles.pergunta}>Quando foi a Ãºltima manutenÃ§Ã£o?</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="DD/MM/AAAA"
+            value={dataManutencao}
+            onChangeText={setDataManutencao}
+            keyboardType="numbers-and-punctuation"
+          />
+          <TouchableOpacity style={styles.button} onPress={handleConcluirComData} disabled={enviando}>
+            <Text style={styles.buttonText}>{enviando ? 'Enviando...' : 'Concluir cadastro'}</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+    </ScrollView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flexGrow: 1, backgroundColor: '#fff', justifyContent: 'center', padding: 20 },
+  title: { fontSize: 26, fontWeight: 'bold', marginBottom: 20, textAlign: 'center' },
+  pergunta: { fontSize: 18, fontWeight: '600', marginBottom: 20, textAlign: 'center' },
+  voltar: { color: '#007AFF', marginBottom: 20 },
+  input: { borderWidth: 1, borderColor: '#ccc', borderRadius: 8, padding: 15, marginBottom: 15 },
+  sugestoes: { marginTop: -10, marginBottom: 15, borderWidth: 1, borderColor: '#eee', borderRadius: 8 },
+  sugestaoItem: { padding: 12, borderBottomWidth: 1, borderBottomColor: '#eee' },
+  button: { backgroundColor: '#007AFF', padding: 15, borderRadius: 8, alignItems: 'center', marginBottom: 15 },
+  buttonSecundario: { backgroundColor: '#8E8E93' },
+  buttonText: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
+  pecaItem: { borderWidth: 1, borderColor: '#ccc', borderRadius: 8, padding: 15, marginBottom: 10 },
+  pecaItemSelecionada: { backgroundColor: '#007AFF', borderColor: '#007AFF' },
+  pecaTextoSelecionado: { color: '#fff', fontWeight: 'bold' },
+});
+
+--- C:\Deenvolvimento\ifba\desenvolvimento\PI\ciclo\mobile\ciclo\app\_layout.tsx ---
+
+import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
+import { Stack } from 'expo-router';
+import { StatusBar } from 'expo-status-bar';
+import 'react-native-reanimated';
+
+import { useColorScheme } from '@/hooks/use-color-scheme';
+
+export default function RootLayout() {
+  const colorScheme = useColorScheme();
+
+  return (
+    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+      <Stack>
+        <Stack.Screen name="index" options={{ headerShown: false }} />
+        <Stack.Screen name="cadastro" options={{ headerShown: false }} />
+        <Stack.Screen name="onboarding" options={{ headerShown: false }} />
+        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+      </Stack>
+      <StatusBar style="auto" />
+    </ThemeProvider>
+  );
+}
+
+--- C:\Deenvolvimento\ifba\desenvolvimento\PI\ciclo\mobile\ciclo\components\ui\icon-symbol.ios.tsx ---
+
+import { SymbolView, SymbolViewProps, SymbolWeight } from 'expo-symbols';
+import { StyleProp, ViewStyle } from 'react-native';
+
+export function IconSymbol({
+  name,
+  size = 24,
+  color,
+  style,
+  weight = 'regular',
+}: {
+  name: SymbolViewProps['name'];
+  size?: number;
+  color: string;
+  style?: StyleProp<ViewStyle>;
+  weight?: SymbolWeight;
+}) {
+  return (
+    <SymbolView
+      weight={weight}
+      tintColor={color}
+      resizeMode="scaleAspectFit"
+      name={name}
+      style={[
+        {
+          width: size,
+          height: size,
+        },
+        style,
+      ]}
+    />
+  );
+}
+
+--- C:\Deenvolvimento\ifba\desenvolvimento\PI\ciclo\mobile\ciclo\components\ui\icon-symbol.tsx ---
+
+// Fallback for using MaterialIcons on Android and web.
+
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
+import { SymbolWeight, SymbolViewProps } from 'expo-symbols';
+import { ComponentProps } from 'react';
+import { OpaqueColorValue, type StyleProp, type TextStyle } from 'react-native';
+
+type IconMapping = Record<SymbolViewProps['name'], ComponentProps<typeof MaterialIcons>['name']>;
+type IconSymbolName = keyof typeof MAPPING;
+
+/**
+ * Add your SF Symbols to Material Icons mappings here.
+ * - see Material Icons in the [Icons Directory](https://icons.expo.fyi).
+ * - see SF Symbols in the [SF Symbols](https://developer.apple.com/sf-symbols/) app.
+ */
+const MAPPING = {
+  'house.fill': 'home',
+  'paperplane.fill': 'send',
+  'chevron.left.forwardslash.chevron.right': 'code',
+  'chevron.right': 'chevron-right',
+} as IconMapping;
+
+/**
+ * An icon component that uses native SF Symbols on iOS, and Material Icons on Android and web.
+ * This ensures a consistent look across platforms, and optimal resource usage.
+ * Icon `name`s are based on SF Symbols and require manual mapping to Material Icons.
+ */
+export function IconSymbol({
+  name,
+  size = 24,
+  color,
+  style,
+}: {
+  name: IconSymbolName;
+  size?: number;
+  color: string | OpaqueColorValue;
+  style?: StyleProp<TextStyle>;
+  weight?: SymbolWeight;
+}) {
+  return <MaterialIcons color={color} size={size} name={MAPPING[name]} style={style} />;
+}
+
+--- C:\Deenvolvimento\ifba\desenvolvimento\PI\ciclo\mobile\ciclo\components\haptic-tab.tsx ---
+
+import { BottomTabBarButtonProps } from '@react-navigation/bottom-tabs';
+import { PlatformPressable } from '@react-navigation/elements';
+import * as Haptics from 'expo-haptics';
+
+export function HapticTab(props: BottomTabBarButtonProps) {
+  return (
+    <PlatformPressable
+      {...props}
+      onPressIn={(ev) => {
+        if (process.env.EXPO_OS === 'ios') {
+          // Add a soft haptic feedback when pressing down on the tabs.
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        }
+        props.onPressIn?.(ev);
+      }}
+    />
+  );
+}
+
+--- C:\Deenvolvimento\ifba\desenvolvimento\PI\ciclo\mobile\ciclo\constants\api.ts ---
+
+export const API_URL = 'http://192.168.1.7:3000';
+//export const API_URL = 'http://localhost:3000';
+
+--- C:\Deenvolvimento\ifba\desenvolvimento\PI\ciclo\mobile\ciclo\constants\theme.ts ---
+
+/**
+ * Below are the colors that are used in the app. The colors are defined in the light and dark mode.
+ * There are many other ways to style your app. For example, [Nativewind](https://www.nativewind.dev/), [Tamagui](https://tamagui.dev/), [unistyles](https://reactnativeunistyles.vercel.app), etc.
+ */
+
+import { Platform } from 'react-native';
+
+const tintColorLight = '#0a7ea4';
+const tintColorDark = '#fff';
+
+export const Colors = {
+  light: {
+    text: '#11181C',
+    background: '#fff',
+    tint: tintColorLight,
+    icon: '#687076',
+    tabIconDefault: '#687076',
+    tabIconSelected: tintColorLight,
+  },
+  dark: {
+    text: '#ECEDEE',
+    background: '#151718',
+    tint: tintColorDark,
+    icon: '#9BA1A6',
+    tabIconDefault: '#9BA1A6',
+    tabIconSelected: tintColorDark,
+  },
+};
+
+export const Fonts = Platform.select({
+  ios: {
+    /** iOS `UIFontDescriptorSystemDesignDefault` */
+    sans: 'system-ui',
+    /** iOS `UIFontDescriptorSystemDesignSerif` */
+    serif: 'ui-serif',
+    /** iOS `UIFontDescriptorSystemDesignRounded` */
+    rounded: 'ui-rounded',
+    /** iOS `UIFontDescriptorSystemDesignMonospaced` */
+    mono: 'ui-monospace',
+  },
+  default: {
+    sans: 'normal',
+    serif: 'serif',
+    rounded: 'normal',
+    mono: 'monospace',
+  },
+  web: {
+    sans: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
+    serif: "Georgia, 'Times New Roman', serif",
+    rounded: "'SF Pro Rounded', 'Hiragino Maru Gothic ProN', Meiryo, 'MS PGothic', sans-serif",
+    mono: "SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
+  },
+});
+
+--- C:\Deenvolvimento\ifba\desenvolvimento\PI\ciclo\mobile\ciclo\hooks\use-color-scheme.ts ---
+
+export { useColorScheme } from 'react-native';
+
+--- C:\Deenvolvimento\ifba\desenvolvimento\PI\ciclo\mobile\ciclo\hooks\use-color-scheme.web.ts ---
+
+import { useEffect, useState } from 'react';
+import { useColorScheme as useRNColorScheme } from 'react-native';
+
+/**
+ * To support static rendering, this value needs to be re-calculated on the client side for web
+ */
+export function useColorScheme() {
+  const [hasHydrated, setHasHydrated] = useState(false);
+
+  useEffect(() => {
+    setHasHydrated(true);
+  }, []);
+
+  const colorScheme = useRNColorScheme();
+
+  if (hasHydrated) {
+    return colorScheme;
+  }
+
+  return 'light';
+}
+
+--- C:\Deenvolvimento\ifba\desenvolvimento\PI\ciclo\mobile\ciclo\eslint.config.js ---
+
+// https://docs.expo.dev/guides/using-eslint/
+const { defineConfig } = require('eslint/config');
+const expoConfig = require('eslint-config-expo/flat');
+
+module.exports = defineConfig([
+  expoConfig,
+  {
+    ignores: ['dist/*'],
+  },
+]);
+
+--- C:\Deenvolvimento\ifba\desenvolvimento\PI\ciclo\mobile\ciclo\expo-env.d.ts ---
+
+/// <reference types="expo/types" />
+
+// NOTE: This file should not be edited and should be in your git ignore

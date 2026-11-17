@@ -1,4 +1,5 @@
 import prisma from '../lib/prisma.js';
+import { TIPOS_BIKE } from '../constants/tiposBike.js';
 /* Este arquivo contém os serviços relacionados ao catálogo de modelos de bike, compartilhado entre todos os usuários */
 
 async function searchModelos(termo) {
@@ -24,6 +25,9 @@ async function findOrCreateModelo({ modelo, marca, tipo }) {
 
     if (!marca || !tipo) {
         throw new Error('marca e tipo são obrigatórios para cadastrar um novo modelo');
+    }
+    if (!TIPOS_BIKE.includes(tipo)) {
+        throw new Error(`tipo inválido. Use um destes: ${TIPOS_BIKE.join(', ')}`);
     }
 
     return await prisma.modeloBike.create({

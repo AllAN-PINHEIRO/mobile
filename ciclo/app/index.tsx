@@ -26,16 +26,16 @@ export default function Login() {
       
       const usuario = response.data;
       
-      // 2. Salva o ID do usuário na memória do celular
-      await AsyncStorage.setItem('@user_id', String(usuario.id));
       
-      // 3. Verifica se tem bikes e redireciona
-      if (usuario.bikes?.length === 0) {
+      await AsyncStorage.setItem('@user_id', String(usuario.id));
+
+      if (!usuario.bikes || usuario.bikes.length === 0) {
         router.replace({ pathname: '/onboarding', params: { userId: usuario.id } });
       } else {
+        await AsyncStorage.setItem('@bike_id', String(usuario.bikes[0].id));
         router.replace('/(tabs)');
       }
-      
+            
     } catch (error: any) {
       console.log(error?.message);
       alert('Email ou senha inválidos');
