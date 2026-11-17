@@ -1,19 +1,13 @@
 ﻿
 --- C:\Deenvolvimento\ifba\desenvolvimento\PI\ciclo\mobile\API\prisma\schema.prisma ---
 
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
   provider = "mongodb"
-  url = env("DATABASE_URL")
+  url      = env("DATABASE_URL")
 }
 
 model User {
@@ -28,44 +22,159 @@ model ModeloBike {
   id     String @id @default(auto()) @map("_id") @db.ObjectId
   modelo String @unique
   marca  String
-  tipo   String
+  tipo   String // padronizado: "mtb" | "road" | "gravel" | "urbana" | "outra"
   bikes  Bike[]
 }
 
 model Bike {
-  id           String     @id @default(auto()) @map("_id") @db.ObjectId
+  id           String                @id @default(auto()) @map("_id") @db.ObjectId
   apelido      String
   ano          Int
-  kmAtual      Float      @default(0)
-  userId       String     @db.ObjectId
-  user         User       @relation(fields: [userId], references: [id])
-  modeloBikeId String     @db.ObjectId
-  modeloBike   ModeloBike @relation(fields: [modeloBikeId], references: [id])
+  kmAtual      Float                 @default(0)
+  userId       String                @db.ObjectId
+  user         User                  @relation(fields: [userId], references: [id])
+  modeloBikeId String                @db.ObjectId
+  modeloBike   ModeloBike            @relation(fields: [modeloBikeId], references: [id])
   pecas        Peca[]
   pedais       Pedal[]
+  manutencoes  HistoricoManutencao[]
 }
 
+// CatÃ¡logo de referÃªncia: vida Ãºtil de cada tipo de componente (igual para todos os usuÃ¡rios)
+model ComponenteReferencia {
+  id             String  @id @default(auto()) @map("_id") @db.ObjectId
+  chave          String  @unique // "corrente", "cassete", "pneus"...
+  nome           String
+  ordem          Int     @default(0)
+  unidade        String // "km" ou "meses"
+  vidaMin        Float? // a partir daqui entra em "planejar troca"
+  vidaMax        Float? // a partir daqui Ã© "troca urgente"
+  vidaMinMtb     Float? // faixas especÃ­ficas quando a fonte separa por tipo de bike
+  vidaMaxMtb     Float?
+  vidaMinRoad    Float?
+  vidaMaxRoad    Float?
+  sinaisDesgaste String
+  observacao     String?
+  fonte          String
+  fonteUrl       String?
+  pecas          Peca[]
+}
+
+// PeÃ§a instalada em uma bike especÃ­fica
 model Peca {
-  id               String    @id @default(auto()) @map("_id") @db.ObjectId
+  id               String                @id @default(auto()) @map("_id") @db.ObjectId
   nome             String
-  kmInstalacao     Float     @default(0)
+  kmInstalacao     Float                 @default(0)
   kmLimite         Float?
   ultimaManutencao DateTime?
-  bikeId           String    @db.ObjectId
-  bike             Bike      @relation(fields: [bikeId], references: [id])
+  criadaEm         DateTime?
+  bikeId           String                @db.ObjectId
+  bike             Bike                  @relation(fields: [bikeId], references: [id])
+  componenteId     String?               @db.ObjectId
+  componente       ComponenteReferencia? @relation(fields: [componenteId], references: [id])
 }
 
 model Pedal {
+  id     String   @id @default(auto()) @map("_id") @db.ObjectId
+  km     Float
+  data   DateTime @default(now())
+  bikeId String   @db.ObjectId
+  bike   Bike     @relation(fields: [bikeId], references: [id])
+}
+
+model HistoricoManutencao {
   id        String   @id @default(auto()) @map("_id") @db.ObjectId
-  km        Float
+  titulo    String // Ex: "RevisÃ£o Geral", "Troca de Corrente"
+  descricao String // Detalhes do serviÃ§o
+  km        Float // Quilometragem da bike no momento do serviÃ§o
   data      DateTime @default(now())
+  tipo      String // "rotina" ou "troca"
   bikeId    String   @db.ObjectId
   bike      Bike     @relation(fields: [bikeId], references: [id])
 }
 
+--- C:\Deenvolvimento\ifba\desenvolvimento\PI\ciclo\mobile\API\prisma\seed.js ---
+
+import prisma from '../src/lib/prisma.js';
+
+const fonte = "The Beam - Cycling Equipment Durability Factors: A Cyclist's Guide";
+const fonteUrl = 'https://thebeamofficial.com/blogs/news/cycling-equipment-durability-factors-a-cyclists-guide';
+
+const componentes = [
+  { chave: 'corrente', nome: 'Corrente', ordem: 1, unidade: 'km',
+    vidaMin: 1500, vidaMax: 5000, vidaMinMtb: 1500, vidaMaxMtb: 3000, vidaMinRoad: 2000, vidaMaxRoad: 5000,
+    sinaisDesgaste: 'Alongamento de 0,5% (11/12v) ou 0,75% (atÃ© 10v)' },
+  { chave: 'cassete', nome: 'Cassete', ordem: 2, unidade: 'km', vidaMin: 4500, vidaMax: 15000,
+    observacao: 'Equivale a 2 ou 3 correntes',
+    sinaisDesgaste: 'Dentes pontiagudos ("barbatana de tubarÃ£o") ou falha na troca' },
+  { chave: 'coroas', nome: 'Coroas (Pedivela)', ordem: 3, unidade: 'km', vidaMin: 6000, vidaMax: 15000,
+    observacao: 'Equivale a 2 cassetes',
+    sinaisDesgaste: 'Desgaste visÃ­vel nos dentes e queda de corrente' },
+  { chave: 'pneus', nome: 'Pneus', ordem: 4, unidade: 'km',
+    vidaMin: 1000, vidaMax: 6000, vidaMinMtb: 1000, vidaMaxMtb: 3000, vidaMinRoad: 3000, vidaMaxRoad: 6000,
+    sinaisDesgaste: 'SumiÃ§o dos indicadores TWI, cortes na carcaÃ§a ou ressecamento' },
+  { chave: 'pastilhas', nome: 'Pastilhas de Freio', ordem: 5, unidade: 'km', vidaMin: 800, vidaMax: 5600,
+    observacao: 'Pode cair para menos de 100 km na lama',
+    sinaisDesgaste: 'Material de atrito abaixo de 0,5 mm (Shimano/SRAM)' },
+  { chave: 'discos', nome: 'Discos de Freio (Rotores)', ordem: 6, unidade: 'km', vidaMin: 6000, vidaMax: 15000,
+    sinaisDesgaste: 'Espessura mÃ­nima de 1,5 mm (Shimano) ou 1,55 mm (SRAM)' },
+  { chave: 'movimento-central', nome: 'Movimento Central', ordem: 7, unidade: 'km', vidaMin: 5000, vidaMax: 16000,
+    sinaisDesgaste: 'Folga axial, rangidos ou rolamentos travando' },
+  // Sem vidaMin na fonte: o app usa 75% de vidaMax como inÃ­cio da faixa de atenÃ§Ã£o
+  { chave: 'suspensao', nome: 'SuspensÃ£o (RevisÃ£o)', ordem: 8, unidade: 'meses', vidaMax: 12,
+    observacao: 'A fonte tambÃ©m indica 50 a 125 horas de uso',
+    sinaisDesgaste: 'Perda de sensibilidade, vazamento de Ã³leo ou ressecamento' },
+  { chave: 'quadro', nome: 'Quadro (Estrutura)', ordem: 9, unidade: 'meses', vidaMin: 60, vidaMax: 120,
+    observacao: '5 a 10 anos para alumÃ­nio; aÃ§o, titÃ¢nio e carbono tÃªm vida Ãºtil vitalÃ­cia',
+    sinaisDesgaste: 'Fadiga estrutural (norma ISO 4210-6, 500.000 ciclos)' },
+];
+
+for (const c of componentes) {
+  await prisma.componenteReferencia.upsert({
+    where: { chave: c.chave },
+    update: { ...c, fonte, fonteUrl },
+    create: { ...c, fonte, fonteUrl },
+  });
+}
+
+console.log(`Seed concluÃ­do: ${componentes.length} componentes`);
+process.exit(0);
+
+--- C:\Deenvolvimento\ifba\desenvolvimento\PI\ciclo\mobile\API\src\constants\tiposBike.js ---
+
+/* Tipos de bike padronizados. O app envia sempre um destes valores. */
+export const TIPOS_BIKE = ['mtb', 'road', 'gravel', 'urbana', 'outra'];
+
+/* Converte valores antigos (texto livre, ex: "Speed", "MTB ") para o padrÃ£o */
+export function normalizarTipo(tipo) {
+    const t = String(tipo ?? '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .trim()
+        .toLowerCase();
+
+    if (['mtb', 'mountain', 'mountain bike'].includes(t)) return 'mtb';
+    if (['road', 'speed', 'estrada', 'strada'].includes(t)) return 'road';
+    if (t === 'gravel') return 'gravel';
+    if (['urbana', 'urban', 'city', 'cidade'].includes(t)) return 'urbana';
+    return 'outra';
+}
+
+--- C:\Deenvolvimento\ifba\desenvolvimento\PI\ciclo\mobile\API\src\constants\tiposBike.ts ---
+
+/* Tipos de bike padronizados (mesma lista validada na API: src/constants/tiposBike.js) */
+export const TIPOS_BIKE = [
+  { valor: 'mtb', rotulo: 'MTB' },
+  { valor: 'road', rotulo: 'Speed / Estrada' },
+  { valor: 'gravel', rotulo: 'Gravel' },
+  { valor: 'urbana', rotulo: 'Urbana' },
+  { valor: 'outra', rotulo: 'Outra' },
+];
+
 --- C:\Deenvolvimento\ifba\desenvolvimento\PI\ciclo\mobile\API\src\controllers\bikeController.js ---
 
 import bikeService from '../services/bikeService.js';
+import pecaService from '../services/pecaService.js';
 /* Este arquivo contÃ©m os controladores relacionados Ã s bikes dos usuÃ¡rios */
 
 /*busco as bikes de um usuÃ¡rio, usado para saber se ele jÃ¡ passou pelo onboarding*/
@@ -74,24 +183,107 @@ async function getByUser(req, res) {
     res.status(200).json(bikes);
 }
 
-/*crio a primeira bike do usuÃ¡rio, com o modelo e a manutenÃ§Ã£o inicial informados no onboarding*/
+/*crio a bike do usuÃ¡rio, com o modelo, o km atual e as manutenÃ§Ãµes recentes informadas no onboarding*/
 async function create(req, res) {
-    const { userId, apelido, ano, modelo, marca, tipo, manutencoes } = req.body;
+    const { userId, apelido, ano, modelo, marca, tipo, kmAtual, pecas } = req.body;
     if (!userId || !apelido || !ano || !modelo) {
         return res.status(400).json({ error: 'userId, apelido, ano e modelo sÃ£o obrigatÃ³rios' });
     }
 
     try {
-        const bike = await bikeService.createBike({ userId, apelido, ano, modelo, marca, tipo, manutencoes });
+        const bike = await bikeService.createBike({ userId, apelido, ano, modelo, marca, tipo, kmAtual, pecas });
         res.status(201).json(bike);
     } catch (error) {
         res.status(400).json({ error: error.message });
     }
 }
 
+/*retorno o estado (bom, mÃ©dio, ruim) de cada peÃ§a da bike*/
+async function getPecasStatus(req, res) {
+    try {
+        const resultado = await pecaService.getStatusByBike(req.params.bikeId);
+        if (!resultado) {
+            return res.status(404).json({ error: 'Bike nÃ£o encontrada' });
+        }
+        res.status(200).json(resultado);
+    } catch (error) {
+        console.error('Erro ao calcular status das peÃ§as:', error);
+        res.status(500).json({ error: 'Erro interno do servidor' });
+    }
+}
+
 export default {
     getByUser,
-    create
+    create,
+    getPecasStatus
+};
+
+--- C:\Deenvolvimento\ifba\desenvolvimento\PI\ciclo\mobile\API\src\controllers\componenteController.js ---
+
+import componenteService from '../services/componenteService.js';
+/* Este arquivo contÃ©m os controladores do catÃ¡logo de componentes */
+
+/*listo o catÃ¡logo inteiro, usado no onboarding e no registro de troca*/
+async function list(req, res) {
+    try {
+        const componentes = await componenteService.listar();
+        res.status(200).json(componentes);
+    } catch (error) {
+        console.error('Erro ao listar componentes:', error);
+        res.status(500).json({ error: 'Erro interno do servidor' });
+    }
+}
+
+export default {
+    list
+};
+
+--- C:\Deenvolvimento\ifba\desenvolvimento\PI\ciclo\mobile\API\src\controllers\manutencaoController.js ---
+
+import manutencaoService from '../services/manutencaoService.js';
+
+async function create(req, res) {
+    try {
+        const { bikeId, titulo, descricao, km, data, tipo, componenteChave } = req.body;
+
+        if (!bikeId || !titulo || km === undefined || km === null || km === '') {
+            return res.status(400).json({ error: 'Faltam dados obrigatÃ³rios' });
+        }
+        if (tipo === 'troca' && !componenteChave) {
+            return res.status(400).json({ error: 'Informe qual componente foi trocado' });
+        }
+
+        const manutencao = await manutencaoService.createManutencao({
+            bikeId,
+            titulo,
+            descricao: descricao ?? '',
+            km: Number(km),
+            data: data ? new Date(data) : new Date(),
+            tipo: tipo ?? 'rotina',
+            componenteChave
+        });
+
+        res.status(201).json(manutencao);
+    } catch (error) {
+        console.error('Erro ao criar manutenÃ§Ã£o:', error);
+        res.status(500).json({ error: 'Erro interno do servidor' });
+    }
+}
+
+async function getByBike(req, res) {
+    try {
+        const { bikeId } = req.params;
+        const manutencoes = await manutencaoService.getManutencoesByBike(bikeId);
+        res.status(200).json(manutencoes);
+    } catch (error) {
+        console.error('Erro ao buscar histÃ³rico:', error);
+        res.status(500).json({ error: 'Erro interno do servidor' });
+    }
+}
+
+export default {
+    create,
+    getByBike
 };
 
 --- C:\Deenvolvimento\ifba\desenvolvimento\PI\ciclo\mobile\API\src\controllers\modeloBikeController.js ---
@@ -190,7 +382,32 @@ const router = Router();
 
 router.get('/bikes/usuario/:userId', bikeController.getByUser);
 
+router.get('/bikes/:bikeId/pecas', bikeController.getPecasStatus);
+
 router.post('/bikes', bikeController.create);
+
+export default router;
+
+--- C:\Deenvolvimento\ifba\desenvolvimento\PI\ciclo\mobile\API\src\routes\componenteRoutes.js ---
+
+import { Router } from 'express';
+import componenteController from '../controllers/componenteController.js';
+
+/* Este arquivo define as rotas do catÃ¡logo de componentes */
+const router = Router();
+
+router.get('/componentes', componenteController.list);
+
+export default router;
+
+--- C:\Deenvolvimento\ifba\desenvolvimento\PI\ciclo\mobile\API\src\routes\manutencaoRoutes.js ---
+
+import { Router } from 'express';
+import manutencaoController from '../controllers/manutencaoController.js';
+
+const router = Router();
+router.post('/', manutencaoController.create);
+router.get('/:bikeId', manutencaoController.getByBike);
 
 export default router;
 
@@ -239,24 +456,39 @@ async function getBikesByUserId(userId) {
     });
 }
 
-/*crio a bike do usuÃ¡rio reaproveitando ou cadastrando o modelo no catÃ¡logo, e jÃ¡ registro as peÃ§as com manutenÃ§Ã£o recente informadas no onboarding*/
-async function createBike({ userId, apelido, ano, modelo, marca, tipo, manutencoes }) {
+/*crio a bike reaproveitando ou cadastrando o modelo no catÃ¡logo, e jÃ¡ crio uma peÃ§a para cada componente do catÃ¡logo.
+  pecas = componentes com manutenÃ§Ã£o recente informada no onboarding: { chave, data, kmInstalacao? }
+  - componente informado sem km de instalaÃ§Ã£o: assume o km atual da bike
+  - componente nÃ£o informado: conta o desgaste desde o km 0 da bike*/
+async function createBike({ userId, apelido, ano, modelo, marca, tipo, kmAtual, pecas }) {
     const modeloBike = await modeloBikeService.findOrCreateModelo({ modelo, marca, tipo });
+    const componentes = await prisma.componenteReferencia.findMany();
+
+    const km = Number(kmAtual) || 0;
+    const informadas = new Map((pecas ?? []).map((p) => [p.chave, p]));
 
     return await prisma.bike.create({
         data: {
             apelido,
             ano,
+            kmAtual: km,
             userId,
             modeloBikeId: modeloBike.id,
-            pecas: manutencoes?.length
-                ? {
-                      create: manutencoes.map((m) => ({
-                          nome: m.peca,
-                          ultimaManutencao: new Date(m.data)
-                      }))
-                  }
-                : undefined
+            pecas: {
+                create: componentes.map((c) => {
+                    const info = informadas.get(c.chave);
+                    const kmInstalacao = info
+                        ? (info.kmInstalacao != null && info.kmInstalacao !== '' ? Number(info.kmInstalacao) : km)
+                        : 0;
+                    return {
+                        nome: c.nome,
+                        componenteId: c.id,
+                        kmInstalacao,
+                        ultimaManutencao: info ? new Date(info.data) : undefined,
+                        criadaEm: new Date()
+                    };
+                })
+            }
         },
         include: { modeloBike: true, pecas: true }
     });
@@ -267,9 +499,71 @@ export default {
     createBike
 };
 
+--- C:\Deenvolvimento\ifba\desenvolvimento\PI\ciclo\mobile\API\src\services\componenteService.js ---
+
+import prisma from '../lib/prisma.js';
+/* Este arquivo contÃ©m os serviÃ§os do catÃ¡logo de referÃªncia de componentes (vida Ãºtil de cada peÃ§a) */
+
+async function listar() {
+    return await prisma.componenteReferencia.findMany({
+        orderBy: { ordem: 'asc' }
+    });
+}
+
+export default {
+    listar
+};
+
+--- C:\Deenvolvimento\ifba\desenvolvimento\PI\ciclo\mobile\API\src\services\manutencaoService.js ---
+
+import prisma from '../lib/prisma.js';
+import pecaService from './pecaService.js';
+
+async function createManutencao({ componenteChave, ...data }) {
+    // Salva o histÃ³rico
+    const manutencao = await prisma.historicoManutencao.create({
+        data
+    });
+
+    // Atualiza a quilometragem atual da bike se a informada na manutenÃ§Ã£o for maior
+    const bike = await prisma.bike.findUnique({ where: { id: data.bikeId } });
+    if (bike && data.km > bike.kmAtual) {
+        await prisma.bike.update({
+            where: { id: data.bikeId },
+            data: { kmAtual: data.km }
+        });
+    }
+
+    // Em uma troca, a peÃ§a passa a contar o desgaste a partir deste km e desta data
+    if (data.tipo === 'troca' && componenteChave) {
+        await pecaService.registrarTroca({
+            bikeId: data.bikeId,
+            componenteChave,
+            km: data.km,
+            data: data.data
+        });
+    }
+
+    return manutencao;
+}
+
+async function getManutencoesByBike(bikeId) {
+    // Busca todas as manutenÃ§Ãµes da bike ordenadas da mais recente para a mais antiga
+    return await prisma.historicoManutencao.findMany({
+        where: { bikeId },
+        orderBy: { data: 'desc' }
+    });
+}
+
+export default {
+    createManutencao,
+    getManutencoesByBike
+};
+
 --- C:\Deenvolvimento\ifba\desenvolvimento\PI\ciclo\mobile\API\src\services\modeloBikeService.js ---
 
 import prisma from '../lib/prisma.js';
+import { TIPOS_BIKE } from '../constants/tiposBike.js';
 /* Este arquivo contÃ©m os serviÃ§os relacionados ao catÃ¡logo de modelos de bike, compartilhado entre todos os usuÃ¡rios */
 
 async function searchModelos(termo) {
@@ -296,6 +590,9 @@ async function findOrCreateModelo({ modelo, marca, tipo }) {
     if (!marca || !tipo) {
         throw new Error('marca e tipo sÃ£o obrigatÃ³rios para cadastrar um novo modelo');
     }
+    if (!TIPOS_BIKE.includes(tipo)) {
+        throw new Error(`tipo invÃ¡lido. Use um destes: ${TIPOS_BIKE.join(', ')}`);
+    }
 
     return await prisma.modeloBike.create({
         data: { modelo, marca, tipo }
@@ -306,6 +603,170 @@ export default {
     searchModelos,
     findModeloByNome,
     findOrCreateModelo
+};
+
+--- C:\Deenvolvimento\ifba\desenvolvimento\PI\ciclo\mobile\API\src\services\pecaService.js ---
+
+import prisma from '../lib/prisma.js';
+import { normalizarTipo } from '../constants/tiposBike.js';
+/* Este arquivo calcula o estado (bom, mÃ©dio, ruim) das peÃ§as de uma bike cruzando o desgaste com o catÃ¡logo de referÃªncia */
+
+/* Nomes usados no onboarding antigo, para ligar peÃ§as jÃ¡ cadastradas ao catÃ¡logo */
+const NOMES_LEGADOS = {
+    'Corrente': 'corrente',
+    'Cassete/Coroa': 'cassete',
+    'Pastilhas de Freio': 'pastilhas',
+    'Pneus/CÃ¢maras': 'pneus',
+    'Amortecedor/SuspensÃ£o': 'suspensao',
+    'Rolamentos (Movimento Central)': 'movimento-central'
+};
+
+/*garante que a bike tenha uma peÃ§a para cada componente do catÃ¡logo (cobre bikes cadastradas antes do catÃ¡logo)*/
+async function sincronizarPecas(bikeId) {
+    const [bike, componentes, pecas] = await Promise.all([
+        prisma.bike.findUnique({ where: { id: bikeId } }),
+        prisma.componenteReferencia.findMany(),
+        prisma.peca.findMany({ where: { bikeId } })
+    ]);
+    if (!bike) return;
+
+    for (const peca of pecas.filter((p) => !p.componenteId)) {
+        const componente = componentes.find((c) => c.chave === NOMES_LEGADOS[peca.nome]);
+        if (!componente) continue;
+
+        const data = { componenteId: componente.id, nome: componente.nome };
+        // peÃ§a com manutenÃ§Ã£o informada e sem km de instalaÃ§Ã£o: assume que foi feita no km atual
+        if (peca.ultimaManutencao && peca.kmInstalacao === 0) {
+            data.kmInstalacao = bike.kmAtual;
+        }
+        await prisma.peca.update({ where: { id: peca.id }, data });
+        peca.componenteId = componente.id;
+    }
+
+    const existentes = new Set(pecas.map((p) => p.componenteId).filter(Boolean));
+    const faltando = componentes.filter((c) => !existentes.has(c.id));
+    if (faltando.length > 0) {
+        await prisma.peca.createMany({
+            data: faltando.map((c) => ({
+                nome: c.nome,
+                bikeId,
+                componenteId: c.id,
+                kmInstalacao: 0,
+                criadaEm: new Date()
+            }))
+        });
+    }
+}
+
+/*escolho a faixa de vida Ãºtil conforme o tipo da bike: MTB e Road tÃªm faixa prÃ³pria, os demais usam a genÃ©rica*/
+function limitesDoComponente(componente, tipo) {
+    let min = componente.vidaMin;
+    let max = componente.vidaMax;
+
+    if (tipo === 'mtb' && componente.vidaMaxMtb != null) {
+        min = componente.vidaMinMtb ?? min;
+        max = componente.vidaMaxMtb;
+    } else if (tipo === 'road' && componente.vidaMaxRoad != null) {
+        min = componente.vidaMinRoad ?? min;
+        max = componente.vidaMaxRoad;
+    }
+
+    if (max == null) return null;
+    if (min == null) min = max * 0.75;
+    return { min, max };
+}
+
+function mesesDesde(data) {
+    return (Date.now() - new Date(data).getTime()) / (1000 * 60 * 60 * 24 * 30.4375);
+}
+
+/*bom: abaixo de min | medio: entre min e max | ruim: a partir de max*/
+function calcularStatus(peca, bike, componente) {
+    const tipo = normalizarTipo(bike.modeloBike?.tipo);
+    const limites = limitesDoComponente(componente, tipo);
+
+    let desgaste;
+    if (componente.unidade === 'meses') {
+        const base = peca.ultimaManutencao ?? peca.criadaEm;
+        desgaste = base ? mesesDesde(base) : 0;
+    } else {
+        desgaste = Math.max(0, bike.kmAtual - peca.kmInstalacao);
+    }
+
+    let status = 'bom';
+    let vidaRestante = 100;
+    if (limites) {
+        vidaRestante = Math.max(0, Math.round(100 - (desgaste / limites.max) * 100));
+        if (desgaste >= limites.max) status = 'ruim';
+        else if (desgaste >= limites.min) status = 'medio';
+    }
+
+    return {
+        id: peca.id,
+        chave: componente.chave,
+        nome: componente.nome,
+        unidade: componente.unidade,
+        desgaste: Math.round(desgaste * 10) / 10,
+        limiteMin: limites?.min ?? null,
+        limiteMax: limites?.max ?? null,
+        vidaRestante,
+        status,
+        sinaisDesgaste: componente.sinaisDesgaste,
+        observacao: componente.observacao ?? null,
+        fonte: componente.fonte
+    };
+}
+
+async function getStatusByBike(bikeId) {
+    await sincronizarPecas(bikeId);
+
+    const bike = await prisma.bike.findUnique({
+        where: { id: bikeId },
+        include: { modeloBike: true }
+    });
+    if (!bike) return null;
+
+    const pecas = await prisma.peca.findMany({
+        where: { bikeId, componenteId: { not: null } },
+        include: { componente: true }
+    });
+
+    const status = pecas
+        .filter((p) => p.componente)
+        .sort((a, b) => a.componente.ordem - b.componente.ordem)
+        .map((p) => calcularStatus(p, bike, p.componente));
+
+    return {
+        bike: {
+            id: bike.id,
+            apelido: bike.apelido,
+            kmAtual: bike.kmAtual,
+            tipo: normalizarTipo(bike.modeloBike?.tipo)
+        },
+        pecas: status
+    };
+}
+
+/*registro a troca: a peÃ§a passa a contar o desgaste a partir do km e da data informados*/
+async function registrarTroca({ bikeId, componenteChave, km, data }) {
+    await sincronizarPecas(bikeId);
+
+    const componente = await prisma.componenteReferencia.findUnique({ where: { chave: componenteChave } });
+    if (!componente) return null;
+
+    const peca = await prisma.peca.findFirst({ where: { bikeId, componenteId: componente.id } });
+    if (!peca) return null;
+
+    return await prisma.peca.update({
+        where: { id: peca.id },
+        data: { kmInstalacao: km, ultimaManutencao: data }
+    });
+}
+
+export default {
+    sincronizarPecas,
+    getStatusByBike,
+    registrarTroca
 };
 
 --- C:\Deenvolvimento\ifba\desenvolvimento\PI\ciclo\mobile\API\src\services\userService.js ---
@@ -358,7 +819,8 @@ import express from 'express';
 import userRoutes from './routes/userRoutes.js';
 import modeloBikeRoutes from './routes/modeloBikeRoutes.js';
 import bikeRoutes from './routes/bikeRoutes.js';
-/* Este arquivo contÃ©m a configuraÃ§Ã£o do servidor Express e a definiÃ§Ã£o das rotas */
+import componenteRoutes from './routes/componenteRoutes.js';
+import manutencaoRoutes from './routes/manutencaoRoutes.js';
 const app = express();
 
 app.use(express.json());
@@ -366,6 +828,8 @@ app.use(express.json());
 app.use(userRoutes);
 app.use(modeloBikeRoutes);
 app.use(bikeRoutes);
+app.use(componenteRoutes);
+app.use('/manutencoes', manutencaoRoutes);
 
 app.listen(3000, () => {
     console.log('Servidor rodando');
@@ -392,60 +856,62 @@ export default defineConfig({
 
 --- C:\Deenvolvimento\ifba\desenvolvimento\PI\ciclo\mobile\ciclo\app\(tabs)\historico.tsx ---
 
-import React from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity } from 'react-native';
+import React, { useState, useCallback } from 'react';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
-
-// Dados simulados. Futuramente, isso virÃ¡  de manutenÃ§Ãµes no banco de dados.
-const historicoSimulado = [
-  {
-    id: '1',
-    data: '10 Set 2026',
-    titulo: 'RevisÃ£o Geral',
-    km: 5430,
-    descricao: 'Limpeza completa, lubrificaÃ§Ã£o da relaÃ§Ã£o e regulagem dos freios.',
-    icone: 'build-outline',
-    cor: '#007AFF' // Azul
-  },
-  {
-    id: '2',
-    data: '15 Ago 2026',
-    titulo: 'Troca de Pneu Traseiro',
-    km: 4800,
-    descricao: 'Pneu antigo substitÃºido devido a desgaste excessivo da borracha.',
-    icone: 'disc-outline',
-    cor: '#FF9500' // Laranja
-  },
-  {
-    id: '3',
-    data: '02 Mai 2026',
-    titulo: 'Troca de Corrente',
-    km: 2500,
-    descricao: 'Corrente atingiu o limite de vida Ãºtil (alargamento).',
-    icone: 'link-outline',
-    cor: '#FF3B30' // Vermelho
-  }
-];
+import { useRouter,useFocusEffect } from 'expo-router';
+import axios from 'axios';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { API_URL } from '@/constants/api';
 
 export default function Historico() {
-  const router = useRouter()
+  const router = useRouter();
+  const [manutencoes, setManutencoes] = useState([]);
+  const [carregando, setCarregando] = useState(true);
+
+  // FunÃ§Ã£o para buscar o histÃ³rico do banco de dados da API
+  async function carregarHistorico() {
+    try {
+      // Exemplo: recuperando a bike selecionada ou do usuÃ¡rio
+      const bikeId = await AsyncStorage.getItem('@bike_id'); 
+      if (!bikeId) {
+        setCarregando(false);
+        return;
+      }
+
+      const response = await axios.get(`${API_URL}/manutencoes/${bikeId}`);
+      setManutencoes(response.data);
+    } catch (error) {
+      console.log('Erro ao carregar histÃ³rico:', error);
+    } finally {
+      setCarregando(false);
+    }
+  }
+
+useFocusEffect(
+  useCallback(() => {
+    carregarHistorico();
+  }, [])
+);
+
   const renderItem = ({ item, index }: { item: any; index: number }) => {
-    const isLast = index === historicoSimulado.length - 1;
+    const isLast = index === manutencoes.length - 1;
+    // Define cor e Ã­cone com base no tipo salvo
+    const isTroca = item.tipo === 'troca';
+    const corIcone = isTroca ? '#FF9500' : '#007AFF';
+    const nomeIcone = isTroca ? 'construct-outline' : 'build-outline';
 
     return (
       <View style={styles.timelineItem}>
-        
         <View style={styles.timelineGraphic}>
-          <View style={[styles.dot, { backgroundColor: item.cor }]}>
-            <Ionicons name={item.icone as any} size={16} color="#fff" />
+          <View style={[styles.dot, { backgroundColor: corIcone }]}>
+            <Ionicons name={nomeIcone} size={16} color="#fff" />
           </View>
           {!isLast && <View style={styles.line} />}
         </View>
 
-    
         <View style={styles.contentColumn}>
-          <Text style={styles.dateText}>{item.data}</Text>
+          <Text style={styles.dateText}>{new Date(item.data).toLocaleDateString('pt-BR')}</Text>
           
           <View style={styles.card}>
             <View style={styles.cardHeader}>
@@ -457,7 +923,6 @@ export default function Historico() {
             <Text style={styles.cardDescription}>{item.descricao}</Text>
           </View>
         </View>
-
       </View>
     );
   };
@@ -469,199 +934,186 @@ export default function Historico() {
         <Text style={styles.subtitle}>Linha do tempo das suas manutenÃ§Ãµes.</Text>
       </View>
 
-      <FlatList
-        data={historicoSimulado}
-        keyExtractor={(item) => item.id}
-        renderItem={renderItem}
-        contentContainerStyle={styles.listContainer}
-        showsVerticalScrollIndicator={false}
-      />
+      {carregando ? (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#007AFF" />
+        </View>
+      ) : manutencoes.length === 0 ? (
+        <View style={styles.emptyContainer}>
+          <Ionicons name="document-text-outline" size={48} color="#ccc" />
+          <Text style={styles.emptyText}>Nenhuma manutenÃ§Ã£o registrada ainda.</Text>
+        </View>
+      ) : (
+        <FlatList
+          data={manutencoes}
+          keyExtractor={(item: any) => item.id}
+          renderItem={renderItem}
+          contentContainerStyle={styles.listContainer}
+          showsVerticalScrollIndicator={false}
+        />
+      )}
+
+      {/* BotÃ£o Fixo na Tela de HistÃ³rico para chamar o Cadastro */}
+      <View style={styles.footer}>
+        <TouchableOpacity 
+          style={styles.addButton}
+          onPress={() => router.push('/cadastro-manutencao' as any)}
+        >
+          <Ionicons name="add-circle-outline" size={24} color="#fff" style={{ marginRight: 8 }} />
+          <Text style={styles.addButtonText}>Registrar ManutenÃ§Ã£o</Text>
+        </TouchableOpacity>
+      </View>
     </View>
   );
 }
+
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#F5F7FA',
-  },
-  header: {
-    paddingTop: 50,
-    paddingHorizontal: 20,
-    paddingBottom: 20,
-    backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#EAEAEA',
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#333',
-  },
-  subtitle: {
-    fontSize: 14,
-    color: '#666',
-    marginTop: 4,
-  },
-  listContainer: {
-    padding: 20,
-  },
-  timelineItem: {
-    flexDirection: 'row',
-    marginBottom: 5,
-  },
-  timelineGraphic: {
-    width: 40,
-    alignItems: 'center',
-  },
-  dot: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    justifyContent: 'center',
-    alignItems: 'center',
-    zIndex: 2, // Garante que a bolinha fique sobre a linha
-  },
-  line: {
-    flex: 1,
-    width: 2,
-    backgroundColor: '#D1D5DB', // Cor da linha conectora
-    marginTop: -5,
-    marginBottom: -5,
-    zIndex: 1,
-  },
-  contentColumn: {
-    flex: 1,
-    paddingLeft: 10,
-    paddingBottom: 25, // EspaÃ§amento entre os itens
-  },
-  dateText: {
-    fontSize: 13,
-    fontWeight: 'bold',
-    color: '#888',
-    marginBottom: 6,
-    textTransform: 'uppercase',
-  },
-  card: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  cardHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 8,
-  },
-  cardTitle: {
-    flex: 1,
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#333',
-    paddingRight: 10,
-  },
-  kmBadge: {
-    backgroundColor: '#E5F1FF',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
-  },
-  kmBadgeText: {
-    color: '#007AFF',
-    fontSize: 12,
-    fontWeight: 'bold',
-  },
-  cardDescription: {
-    fontSize: 14,
-    color: '#666',
-    lineHeight: 20,
-  },
-    footer: {
-    position: 'absolute',
-    bottom: 30,
-    left: 20,
-    right: 20,
-  },
-    addButton: {
-    flexDirection: 'row',
-    backgroundColor: '#007AFF',
-    paddingVertical: 16,
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#007AFF',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 5,
-  },
-    addButtonText: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: 'bold',
-  },
+  container: { flex: 1, backgroundColor: '#F5F7FA' },
+  header: { paddingTop: 50, paddingHorizontal: 20, paddingBottom: 20, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#EAEAEA' },
+  title: { fontSize: 24, fontWeight: 'bold', color: '#333' },
+  subtitle: { fontSize: 14, color: '#666', marginTop: 4 },
+  listContainer: { padding: 20, paddingBottom: 100 },
+  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  emptyContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 },
+  emptyText: { color: '#888', marginTop: 10, fontSize: 16 },
+  timelineItem: { flexDirection: 'row', marginBottom: 5 },
+  timelineGraphic: { width: 40, alignItems: 'center' },
+  dot: { width: 32, height: 32, borderRadius: 16, justifyContent: 'center', alignItems: 'center', zIndex: 2 },
+  line: { flex: 1, width: 2, backgroundColor: '#D1D5DB', marginTop: -5, marginBottom: -5, zIndex: 1 },
+  contentColumn: { flex: 1, paddingLeft: 10, paddingBottom: 25 },
+  dateText: { fontSize: 13, fontWeight: 'bold', color: '#888', marginBottom: 6, textTransform: 'uppercase' },
+  card: { backgroundColor: '#fff', borderRadius: 12, padding: 16, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 },
+  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 },
+  cardTitle: { flex: 1, fontSize: 16, fontWeight: 'bold', color: '#333', paddingRight: 10 },
+  kmBadge: { backgroundColor: '#E5F1FF', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
+  kmBadgeText: { color: '#007AFF', fontSize: 12, fontWeight: 'bold' },
+  cardDescription: { fontSize: 14, color: '#666', lineHeight: 20 },
+  footer: { position: 'absolute', bottom: 30, left: 20, right: 20 },
+  addButton: { flexDirection: 'row', backgroundColor: '#007AFF', paddingVertical: 16, borderRadius: 12, justifyContent: 'center', alignItems: 'center', shadowColor: '#007AFF', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 5 },
+  addButtonText: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
 });
 
 --- C:\Deenvolvimento\ifba\desenvolvimento\PI\ciclo\mobile\ciclo\app\(tabs)\index.tsx ---
 
-import React from 'react';
-import { View, Text, StyleSheet, ScrollView } from 'react-native';
+import React, { useCallback, useState } from 'react';
+import { View, Text, StyleSheet, ScrollView, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from 'expo-router';
+import axios from 'axios';
 
-// simulaÃ§Ã£od e dados temporria
-const pecasSimuladas = [
-  { kmRodado: 1200, kmLimite: 2500 },
-  { kmRodado: 4800, kmLimite: 5000 },
-  { kmRodado: 1500, kmLimite: 5000 },
-  { kmRodado: 1200, kmLimite: 1500 },
-  { kmRodado: 3500, kmLimite: 10000 },
-];
+import { API_URL } from '@/constants/api';
+import { getBikeId } from '@/utils/bike';
+
+type PecaStatus = {
+  id: string;
+  nome: string;
+  vidaRestante: number;
+  status: 'bom' | 'medio' | 'ruim';
+};
+
+type Resumo = {
+  apelido: string;
+  kmAtual: number;
+  pecas: PecaStatus[];
+  kmUltimaManutencao: number | null;
+};
 
 export default function Home() {
-  const calcularSaudeGeral = () => {
-    let somaSaude = 0;
-    
-    pecasSimuladas.forEach(peca => {
-      const porcentagemGasta = (peca.kmRodado / peca.kmLimite) * 100;
-      const saudeRestante = Math.max(0, 100 - porcentagemGasta);
-      somaSaude += saudeRestante;
-    });
+  const [resumo, setResumo] = useState<Resumo | null>(null);
+  const [carregando, setCarregando] = useState(true);
+  const [erro, setErro] = useState('');
 
-    const media = somaSaude / pecasSimuladas.length;
-    return media;
-  };
+  // Busca o estado das peÃ§as e o histÃ³rico da bike ativa sempre que a Home volta ao foco
+  const carregarResumo = useCallback(async () => {
+    try {
+      setErro('');
+      const bikeId = await getBikeId();
+      if (!bikeId) {
+        setResumo(null);
+        setErro('Nenhuma bike cadastrada.');
+        return;
+      }
 
-  const saudeMedia = calcularSaudeGeral();
+      const [pecasRes, historicoRes] = await Promise.all([
+        axios.get(`${API_URL}/bikes/${bikeId}/pecas`),
+        axios.get(`${API_URL}/manutencoes/${bikeId}`),
+      ]);
+
+      const historico = historicoRes.data as { km: number }[];
+      setResumo({
+        apelido: pecasRes.data.bike.apelido,
+        kmAtual: pecasRes.data.bike.kmAtual,
+        pecas: pecasRes.data.pecas,
+        // o histÃ³rico jÃ¡ vem ordenado da manutenÃ§Ã£o mais recente para a mais antiga
+        kmUltimaManutencao: historico.length > 0 ? historico[0].km : null,
+      });
+    } catch (error: any) {
+      console.log('Erro ao carregar a Home:', error?.message);
+      setErro('NÃ£o foi possÃ­vel carregar os dados da bike.');
+    } finally {
+      setCarregando(false);
+    }
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      carregarResumo();
+    }, [carregarResumo])
+  );
+
+  if (carregando) {
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator size="large" color="#007AFF" />
+      </View>
+    );
+  }
+
+  if (!resumo) {
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center', padding: 20 }]}>
+        <Text style={styles.subtitle}>{erro || 'Nenhuma bike cadastrada.'}</Text>
+      </View>
+    );
+  }
+
+  // SaÃºde geral: mÃ©dia da vida Ãºtil restante de todas as peÃ§as
+  const saudeMedia =
+    resumo.pecas.length > 0
+      ? resumo.pecas.reduce((soma, p) => soma + p.vidaRestante, 0) / resumo.pecas.length
+      : 100;
   const saudeExibicao = saudeMedia.toFixed(0);
 
+  // A cor e o texto seguem a pior peÃ§a: uma corrente no limite nÃ£o pode ser escondida pela mÃ©dia
+  const urgentes = resumo.pecas.filter((p) => p.status === 'ruim');
+  const emAtencao = resumo.pecas.filter((p) => p.status === 'medio');
 
-  let corStatus = '#34C759'; 
+  let corStatus = '#34C759';
   let textoStatus = 'Bike em Ã“timo Estado';
 
-  if (saudeMedia <= 25) {
-    corStatus = '#FF3B30'; 
+  if (urgentes.length > 0) {
+    corStatus = '#FF3B30';
     textoStatus = 'ManutenÃ§Ã£o Urgente';
-  } else if (saudeMedia <= 50) {
-    corStatus = '#FF9500'; 
+  } else if (emAtencao.length > 0) {
+    corStatus = '#FF9500';
     textoStatus = 'AtenÃ§Ã£o NecessÃ¡ria';
   }
 
-  // OdÃ´metro isso aqui precisa puxar da API do banco de dados pra funfar legal
-  const odometroTotal = 5430;
-  const kmDesdeUltimaManutencao = 1200;
+  const precisamAtencao = [...urgentes, ...emAtencao].map((p) => p.nome);
+
+  const odometroTotal = Math.round(resumo.kmAtual);
+  const kmDesdeUltimaManutencao =
+    resumo.kmUltimaManutencao != null
+      ? Math.max(0, Math.round(resumo.kmAtual - resumo.kmUltimaManutencao))
+      : null;
 
   return (
     <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
       <View style={styles.header}>
         <Text style={styles.greeting}>OlÃ¡</Text>
-        <Text style={styles.subtitle}>resumo</Text>
+        <Text style={styles.subtitle}>{resumo.apelido}</Text>
       </View>
 
-      
       <View style={styles.card}>
         <Text style={styles.cardTitle}>SaÃºde Geral da Bike</Text>
         <View style={styles.healthContainer}>
@@ -673,6 +1125,9 @@ export default function Home() {
           <Text style={[styles.healthStatusText, { color: corStatus }]}>
             {textoStatus}
           </Text>
+          {precisamAtencao.length > 0 && (
+            <Text style={styles.atencaoText}>PeÃ§as para acompanhar: {precisamAtencao.join(', ')}</Text>
+          )}
         </View>
       </View>
 
@@ -691,8 +1146,8 @@ export default function Home() {
           
           <View style={styles.odoItem}>
             <Ionicons name="build-outline" size={32} color="#FF9500" />
-            <Text style={styles.odoValue}>{kmDesdeUltimaManutencao} km</Text>
-            <Text style={styles.odoLabel}>Desde a Ãºltima revisÃ£o</Text>
+            <Text style={styles.odoValue}>{kmDesdeUltimaManutencao != null ? `${kmDesdeUltimaManutencao} km` : 'â€”'}</Text>
+            <Text style={styles.odoLabel}>{kmDesdeUltimaManutencao != null ? 'Desde a Ãºltima revisÃ£o' : 'Nenhuma revisÃ£o registrada'}</Text>
           </View>
         </View>
       </View>
@@ -760,6 +1215,12 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
+  atencaoText: {
+    fontSize: 13,
+    color: '#666',
+    textAlign: 'center',
+    marginTop: 8,
+  },
   odoRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -791,73 +1252,118 @@ const styles = StyleSheet.create({
 
 --- C:\Deenvolvimento\ifba\desenvolvimento\PI\ciclo\mobile\ciclo\app\(tabs)\manutencao.tsx ---
 
-import React from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, DimensionValue, Dimensions } from 'react-native';
+import React, { useCallback, useState } from 'react';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, DimensionValue, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
+import axios from 'axios';
 
-// Dados simulados para o design. 
-// Futuramente, esses dados virÃ£o da sua API cruzando o odÃ´metro da bike com a tabela de "valores mÃ©dios".
-const pecasSimuladas = [
-  { id: '1', nome: 'Corrente', kmRodado: 1200, kmLimite: 2500, icone: 'link-outline' },
-  { id: '2', nome: 'Pneu Traseiro', kmRodado: 4800, kmLimite: 5000, icone: 'disc-outline' },
-  { id: '3', nome: 'Pneu Dianteiro', kmRodado: 1500, kmLimite: 5000, icone: 'disc-outline' },
-  { id: '4', nome: 'Pastilha de Freio', kmRodado: 1200, kmLimite: 1500, icone: 'stop-circle-outline' },
-  { id: '5', nome: 'Cassete', kmRodado: 3500, kmLimite: 10000, icone: 'cog-outline' },
-];
+import { API_URL } from '@/constants/api';
+import { getBikeId } from '@/utils/bike';
+
+type StatusPeca = 'bom' | 'medio' | 'ruim';
+
+type PecaStatus = {
+  id: string;
+  chave: string;
+  nome: string;
+  unidade: 'km' | 'meses';
+  desgaste: number;
+  limiteMax: number | null;
+  vidaRestante: number;
+  status: StatusPeca;
+  sinaisDesgaste: string;
+  observacao: string | null;
+};
+
+// Ãcone de cada componente do catÃ¡logo
+const ICONES: Record<string, string> = {
+  corrente: 'link-outline',
+  cassete: 'cog-outline',
+  coroas: 'cog-outline',
+  pneus: 'disc-outline',
+  pastilhas: 'stop-circle-outline',
+  discos: 'ellipse-outline',
+  'movimento-central': 'sync-outline',
+  suspensao: 'swap-vertical-outline',
+  quadro: 'cube-outline',
+};
+
+// Cor e texto de cada estado calculado pela API
+const ESTADOS: Record<StatusPeca, { cor: string; texto: string }> = {
+  bom: { cor: '#34C759', texto: 'Em bom estado' },
+  medio: { cor: '#FF9500', texto: 'Planejar troca' },
+  ruim: { cor: '#FF3B30', texto: 'Troca urgente' },
+};
 
 export default function Manutencao() {
-  const router = useRouter()
-  
-  
-  // mudando statuzinhos massas
-  const getStatusSaude = (kmRodado: number, kmLimite: number) => {
-    const porcentagemGasta = (kmRodado / kmLimite) * 100;
-    const saudeRestante = Math.max(0, 100 - porcentagemGasta); // Garante que nÃ£o fique negativo
+  const router = useRouter();
+  const [pecas, setPecas] = useState<PecaStatus[]>([]);
+  const [carregando, setCarregando] = useState(true);
+  const [erro, setErro] = useState('');
 
-    let cor = '#34C759'; 
-    let status = 'Em bom estado';
-
-    if (saudeRestante <= 15) {
-      cor = '#FF3B30'; 
-      status = 'Troca urgente';
-    } else if (saudeRestante <= 40) {
-      cor = '#FF9500'; 
-      status = 'Planejar troca';
+  // Busca o estado das peÃ§as da bike ativa sempre que a tela volta ao foco
+  const carregarPecas = useCallback(async () => {
+    try {
+      setErro('');
+      const bikeId = await getBikeId();
+      if (!bikeId) {
+        setPecas([]);
+        setErro('Nenhuma bike cadastrada.');
+        return;
+      }
+      const response = await axios.get(`${API_URL}/bikes/${bikeId}/pecas`);
+      setPecas(response.data.pecas);
+    } catch (error: any) {
+      console.log('Erro ao carregar peÃ§as:', error?.message);
+      setErro('NÃ£o foi possÃ­vel carregar o estado das peÃ§as.');
+    } finally {
+      setCarregando(false);
     }
+  }, []);
 
-    return { saudeRestante: saudeRestante.toFixed(0), cor, status };
-  };
+  useFocusEffect(
+    useCallback(() => {
+      carregarPecas();
+    }, [carregarPecas])
+  );
 
-  const renderPeca = ({ item }: { item: any }) => {
-    const { saudeRestante, cor, status } = getStatusSaude(item.kmRodado, item.kmLimite);
+  const renderPeca = ({ item }: { item: PecaStatus }) => {
+    const { cor, texto } = ESTADOS[item.status];
+    const unidade = item.unidade === 'km' ? 'km' : 'meses';
+    const uso = item.limiteMax != null
+      ? `Uso: ${Math.round(item.desgaste)} / ${Math.round(item.limiteMax)} ${unidade}`
+      : `Uso: ${Math.round(item.desgaste)} ${unidade}`;
 
     return (
       <View style={styles.card}>
         <View style={styles.cardHeader}>
           <View style={styles.nomeContainer}>
-            <Ionicons name={item.icone as any} size={20} color="#555" style={styles.icone} />
+            <Ionicons name={(ICONES[item.chave] ?? 'build-outline') as any} size={20} color="#555" style={styles.icone} />
             <Text style={styles.nomePeca}>{item.nome}</Text>
           </View>
           <Text style={[styles.statusBadge, { color: cor, borderColor: cor }]}>
-            {status}
+            {texto}
           </Text>
         </View>
 
         <View style={styles.infoContainer}>
-          <Text style={styles.infoText}>Uso: {item.kmRodado} / {item.kmLimite} km</Text>
-          <Text style={[styles.porcentagemText, { color: cor }]}>{saudeRestante}% Vida Ãºtil</Text>
+          <Text style={styles.infoText}>{uso}</Text>
+          <Text style={[styles.porcentagemText, { color: cor }]}>{item.vidaRestante}% Vida Ãºtil</Text>
         </View>
 
-        
-      <View style={styles.barraFundo}>
-        <View 
-          style={[
-            styles.barraProgresso, 
-            { width: `${saudeRestante}%` as DimensionValue, backgroundColor: cor }
-          ]} 
+        <View style={styles.barraFundo}>
+          <View
+            style={[
+              styles.barraProgresso,
+              { width: `${item.vidaRestante}%` as DimensionValue, backgroundColor: cor }
+            ]}
           />
         </View>
+
+        {item.status !== 'bom' && (
+          <Text style={styles.sinaisText}>Sinais de desgaste: {item.sinaisDesgaste}</Text>
+        )}
       </View>
     );
   };
@@ -866,16 +1372,24 @@ export default function Manutencao() {
     <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.title}>Status das PeÃ§as</Text>
-        <Text style={styles.subtitle}>Acompanhe o desgaste com base na quilometragem.</Text>
+        <Text style={styles.subtitle}>Desgaste calculado com base na quilometragem e nas faixas de vida Ãºtil de cada componente.</Text>
       </View>
 
-      <FlatList
-        data={pecasSimuladas}
-        keyExtractor={(item) => item.id}
-        renderItem={renderPeca}
-        contentContainerStyle={styles.listContainer}
-        showsVerticalScrollIndicator={false}
-      />
+      {carregando ? (
+        <View style={styles.centro}>
+          <ActivityIndicator size="large" color="#007AFF" />
+        </View>
+      ) : (
+        <FlatList
+          data={pecas}
+          keyExtractor={(item) => item.id}
+          renderItem={renderPeca}
+          contentContainerStyle={styles.listContainer}
+          showsVerticalScrollIndicator={false}
+          ListEmptyComponent={<Text style={styles.vazioText}>{erro || 'Nenhuma peÃ§a encontrada.'}</Text>}
+          ListFooterComponent={<View style={{ height: 90 }} />}
+        />
+      )}
     
       <View style={styles.footer}>
           <TouchableOpacity 
@@ -971,6 +1485,23 @@ const styles = StyleSheet.create({
     backgroundColor: '#EAEAEA',
     borderRadius: 4,
     overflow: 'hidden',
+  },
+  sinaisText: {
+    fontSize: 12,
+    color: '#888',
+    marginTop: 10,
+    lineHeight: 17,
+  },
+  centro: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  vazioText: {
+    textAlign: 'center',
+    color: '#888',
+    marginTop: 40,
+    fontSize: 15,
   },
   barraProgresso: {
     height: '100%',
@@ -1207,12 +1738,16 @@ export default function TabLayout() {
 
 --- C:\Deenvolvimento\ifba\desenvolvimento\PI\ciclo\mobile\ciclo\app\cadastro-manutencao.tsx ---
 
-import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import axios from 'axios';
+import { API_URL } from '@/constants/api';
+import { getBikeId } from '@/utils/bike';
 
 type TipoManutencao = 'rotina' | 'troca';
+type Componente = { id: string; chave: string; nome: string };
 
 export default function CadastroManutencao() {
   const router = useRouter();
@@ -1221,33 +1756,96 @@ export default function CadastroManutencao() {
   
   // Estados para o formulÃ¡rio
   const [data, setData] = useState('');
+  const [kmAtual, setKmAtual] = useState(''); // <-- Novo estado para o KM
   const [descricao, setDescricao] = useState('');
   
   // Estados especÃ­ficos para "Troca de PeÃ§a"
-  const [pecaTrocada, setPecaTrocada] = useState('');
+  const [componentes, setComponentes] = useState<Componente[]>([]);
+  const [componenteChave, setComponenteChave] = useState('');
   const [marcaNova, setMarcaNova] = useState('');
 
-  function handleSalvar() {
-    // Futuramente, enviaremos os dados para a API aqui
-    if (!data) {
-      alert('Informe a data da manutenÃ§Ã£o.');
+  const [enviando, setEnviando] = useState(false);
+
+  // Carrega o catÃ¡logo de componentes para escolher o que foi trocado
+  useEffect(() => {
+    async function carregarCatalogo() {
+      try {
+        const response = await axios.get(`${API_URL}/componentes`);
+        setComponentes(response.data);
+      } catch (error: any) {
+        console.log('Erro ao carregar catÃ¡logo:', error?.message);
+      }
+    }
+    carregarCatalogo();
+  }, []);
+
+  async function handleSalvar() {
+    if (!data || !kmAtual) {
+      alert('Informe a data e a quilometragem da manutenÃ§Ã£o.');
       return;
     }
     
-    if (tipo === 'troca' && !pecaTrocada) {
+    if (tipo === 'troca' && !componenteChave) {
       alert('Informe qual peÃ§a foi trocada.');
       return;
     }
 
-    alert('ManutenÃ§Ã£o registrada com sucesso!');
-    router.back();
+    setEnviando(true);
+
+    try {
+      // Pega o ID da bike ativa (se nÃ£o estiver salvo, busca a primeira bike do usuÃ¡rio na API)
+      const bikeId = await getBikeId();
+      
+      if (!bikeId) {
+        alert('Erro: Nenhuma bike selecionada.');
+        setEnviando(false);
+        return;
+      }
+      
+      // Converte a data string DD/MM/AAAA para formato ISO (AAAA-MM-DD)
+      const partesData = data.split('/');
+      let dataIso = new Date().toISOString(); // fallback para hoje
+      if (partesData.length === 3) {
+        dataIso = new Date(`${partesData[2]}-${partesData[1]}-${partesData[0]}T12:00:00Z`).toISOString();
+      }
+
+      const km = parseFloat(kmAtual.replace(',', '.'));
+      if (isNaN(km)) {
+        alert('Informe a quilometragem apenas com nÃºmeros.');
+        setEnviando(false);
+        return;
+      }
+
+      const nomePeca = componentes.find((c) => c.chave === componenteChave)?.nome ?? '';
+
+      const payload = {
+        bikeId,
+        tipo,
+        km,
+        titulo: tipo === 'troca' ? `Troca de ${nomePeca}` : 'ManutenÃ§Ã£o de Rotina',
+        descricao: tipo === 'troca'
+          ? `PeÃ§a: ${nomePeca}. Marca: ${marcaNova || 'NÃ£o informada'}. ${descricao}`
+          : descricao,
+        data: dataIso,
+        componenteChave: tipo === 'troca' ? componenteChave : undefined,
+      };
+
+      await axios.post(`${API_URL}/manutencoes`, payload);
+
+      alert('ManutenÃ§Ã£o registrada com sucesso!');
+      router.back(); // Volta para a tela de histÃ³rico, que vai recarregar a lista
+    } catch (error: any) {
+      console.log('Erro ao salvar:', error?.message);
+      alert('Erro ao salvar a manutenÃ§Ã£o no servidor.');
+    } finally {
+      setEnviando(false);
+    }
   }
 
   return (
     <View style={styles.container}>
-      {/* CabeÃ§alho */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+        <TouchableOpacity onPress={() => router.back()} style={styles.backButton} disabled={enviando}>
           <Ionicons name="arrow-back" size={24} color="#333" />
         </TouchableOpacity>
         <Text style={styles.title}>Nova ManutenÃ§Ã£o</Text>
@@ -1256,78 +1854,87 @@ export default function CadastroManutencao() {
 
       <ScrollView contentContainerStyle={styles.scrollContent}>
         
-        
         <View style={styles.selectorContainer}>
           <TouchableOpacity 
             style={[styles.selectorButton, tipo === 'rotina' && styles.selectorButtonActive]}
             onPress={() => setTipo('rotina')}
           >
-            <Text style={[styles.selectorText, tipo === 'rotina' && styles.selectorTextActive]}>
-              ManutenÃ§Ã£o de Rotina
-            </Text>
+            <Text style={[styles.selectorText, tipo === 'rotina' && styles.selectorTextActive]}>Rotina</Text>
           </TouchableOpacity>
           <TouchableOpacity 
             style={[styles.selectorButton, tipo === 'troca' && styles.selectorButtonActive]}
             onPress={() => setTipo('troca')}
           >
-            <Text style={[styles.selectorText, tipo === 'troca' && styles.selectorTextActive]}>
-              Troca de PeÃ§a
-            </Text>
+            <Text style={[styles.selectorText, tipo === 'troca' && styles.selectorTextActive]}>Troca de PeÃ§a</Text>
           </TouchableOpacity>
         </View>
 
-        
-        <Text style={styles.label}>Data do ServiÃ§o</Text>
-        <TextInput
-          style={styles.input}
-          placeholder="DD/MM/AAAA"
-          value={data}
-          onChangeText={setData}
-          keyboardType="numbers-and-punctuation"
-        />
-
+        <View style={styles.row}>
+          <View style={styles.flex1}>
+            <Text style={styles.label}>Data</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="DD/MM/AAAA"
+              value={data}
+              onChangeText={setData}
+              keyboardType="numbers-and-punctuation"
+            />
+          </View>
+          <View style={{ width: 15 }} />
+          <View style={styles.flex1}>
+            <Text style={styles.label}>KM da Bike</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Ex: 1250"
+              value={kmAtual}
+              onChangeText={setKmAtual}
+              keyboardType="numeric"
+            />
+          </View>
+        </View>
         
         {tipo === 'troca' ? (
           <View style={styles.cardDestaque}>
             <Text style={styles.labelDestaque}>O que foi trocado?</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Ex: Corrente, Pastilha de Freio..."
-              value={pecaTrocada}
-              onChangeText={setPecaTrocada}
-            />
-            
+            <View style={styles.chipsContainer}>
+              {componentes.map((c) => {
+                const selecionado = componenteChave === c.chave;
+                return (
+                  <TouchableOpacity
+                    key={c.chave}
+                    style={[styles.chip, selecionado && styles.chipAtivo]}
+                    onPress={() => setComponenteChave(c.chave)}
+                  >
+                    <Text style={[styles.chipText, selecionado && styles.chipTextAtivo]}>{c.nome}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
             <Text style={styles.labelDestaque}>Marca / Modelo Novo (Opcional)</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Ex: Shimano HG53"
-              value={marcaNova}
-              onChangeText={setMarcaNova}
-            />
+            <TextInput style={styles.input} placeholder="Ex: Shimano HG53" value={marcaNova} onChangeText={setMarcaNova} />
           </View>
         ) : (
           <View style={styles.dicaContainer}>
             <Ionicons name="information-circle-outline" size={20} color="#666" />
-            <Text style={styles.dicaText}>
-              Use a opÃ§Ã£o "Rotina" para limpezas, calibraÃ§Ã£o, aplicaÃ§Ã£o de Ã³leo ou regulagens gerais onde nenhuma peÃ§a nova foi instalada.
-            </Text>
+            <Text style={styles.dicaText}>Use para limpezas, calibraÃ§Ã£o ou regulagens gerais sem troca de peÃ§as.</Text>
           </View>
         )}
 
-        <Text style={styles.label}>DescriÃ§Ã£o do ServiÃ§o</Text>
+        <Text style={styles.label}>DescriÃ§Ã£o / ObservaÃ§Ãµes</Text>
         <TextInput
           style={[styles.input, styles.textArea]}
-          placeholder={tipo === 'rotina' ? "Ex: LubrificaÃ§Ã£o da corrente e calibragem." : "Motivo da troca ou observaÃ§Ãµes extras."}
+          placeholder={tipo === 'rotina' ? "Ex: LubrificaÃ§Ã£o da corrente." : "Motivo da troca."}
           value={descricao}
           onChangeText={setDescricao}
-          multiline
-          numberOfLines={4}
-          textAlignVertical="top"
+          multiline numberOfLines={4} textAlignVertical="top"
         />
 
-        {/*  Salvar */}
-        <TouchableOpacity style={styles.saveButton} onPress={handleSalvar}>
-          <Text style={styles.saveButtonText}>Salvar Registro</Text>
+        <TouchableOpacity style={styles.saveButton} onPress={handleSalvar} disabled={enviando}>
+          {enviando ? (
+             <ActivityIndicator color="#fff" />
+          ) : (
+             <Text style={styles.saveButtonText}>Salvar Registro</Text>
+          )}
         </TouchableOpacity>
 
       </ScrollView>
@@ -1346,7 +1953,9 @@ const styles = StyleSheet.create({
   selectorButtonActive: { backgroundColor: '#fff', shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2, elevation: 2 },
   selectorText: { color: '#666', fontWeight: '600' },
   selectorTextActive: { color: '#007AFF', fontWeight: 'bold' },
-  label: { fontSize: 16, fontWeight: 'bold', color: '#333', marginBottom: 8, marginTop: 10 },
+  row: { flexDirection: 'row', justifyContent: 'space-between' },
+  flex1: { flex: 1 },
+  label: { fontSize: 16, fontWeight: 'bold', color: '#333', marginBottom: 8 },
   input: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#ccc', borderRadius: 8, padding: 15, marginBottom: 15, fontSize: 16 },
   textArea: { height: 100 },
   cardDestaque: { backgroundColor: '#E5F1FF', padding: 15, borderRadius: 12, marginBottom: 15, borderWidth: 1, borderColor: '#B3D4FF' },
@@ -1354,6 +1963,11 @@ const styles = StyleSheet.create({
   dicaContainer: { flexDirection: 'row', backgroundColor: '#EAEAEA', padding: 15, borderRadius: 8, marginBottom: 20, alignItems: 'center' },
   dicaText: { flex: 1, marginLeft: 10, color: '#555', fontSize: 13, lineHeight: 18 },
   saveButton: { backgroundColor: '#007AFF', padding: 16, borderRadius: 12, alignItems: 'center', marginTop: 20, shadowColor: '#007AFF', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 5 },
+  chipsContainer: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: 15 },
+  chip: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#B3D4FF', borderRadius: 16, paddingHorizontal: 12, paddingVertical: 8, marginRight: 8, marginBottom: 8 },
+  chipAtivo: { backgroundColor: '#007AFF', borderColor: '#007AFF' },
+  chipText: { color: '#005bb5', fontSize: 14 },
+  chipTextAtivo: { color: '#fff', fontWeight: 'bold' },
   saveButtonText: { color: '#fff', fontWeight: 'bold', fontSize: 18 },
 });
 
@@ -1442,16 +2056,16 @@ export default function Login() {
       
       const usuario = response.data;
       
-      // 2. Salva o ID do usuÃ¡rio na memÃ³ria do celular
-      await AsyncStorage.setItem('@user_id', String(usuario.id));
       
-      // 3. Verifica se tem bikes e redireciona
-      if (usuario.bikes?.length === 0) {
+      await AsyncStorage.setItem('@user_id', String(usuario.id));
+
+      if (!usuario.bikes || usuario.bikes.length === 0) {
         router.replace({ pathname: '/onboarding', params: { userId: usuario.id } });
       } else {
+        await AsyncStorage.setItem('@bike_id', String(usuario.bikes[0].id));
         router.replace('/(tabs)');
       }
-      
+            
     } catch (error: any) {
       console.log(error?.message);
       alert('Email ou senha invÃ¡lidos');
@@ -1674,30 +2288,24 @@ import axios from 'axios';
 import { useEffect, useState } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { API_URL } from '@/constants/api';
+import { TIPOS_BIKE } from '@/constants/tiposBike';
 
 type ModeloSugestao = { id: string; modelo: string; marca: string; tipo: string };
+type Componente = { id: string; chave: string; nome: string };
+type DetalhePeca = { data: string; km: string };
+type PecaPayload = { chave: string; data: string; kmInstalacao?: number };
 
-const PECAS_PADRAO = [
-  'Corrente',
-  'Cassete/Coroa',
-  'Pastilhas de Freio',
-  'Pneus/CÃ¢maras',
-  'Amortecedor/SuspensÃ£o',
-  'Rolamentos (Movimento Central)',
-  'Cabos de CÃ¢mbio e Freio',
-  'Correia de TransmissÃ£o',
-];
-
-type Etapa = 'modelo' | 'marca-tipo' | 'apelido-ano' | 'manutencao' | 'pecas' | 'data';
+type Etapa = 'modelo' | 'marca-tipo' | 'apelido-ano' | 'manutencao' | 'pecas' | 'detalhes';
 
 export default function Onboarding() {
   const router = useRouter();
-  
+
   // Captura o userId e a nova variÃ¡vel "origem" para saber de onde o usuÃ¡rio veio
   const { userId, origem } = useLocalSearchParams<{ userId: string; origem?: string }>();
-  
+
   // VariÃ¡vel que verifica se Ã© um cadastro de uma nova bike vindo da tela de perfil
   const isNovaBike = origem === 'minhas-bikes';
 
@@ -1711,10 +2319,25 @@ export default function Onboarding() {
   const [verificandoModelo, setVerificandoModelo] = useState(false);
   const [apelido, setApelido] = useState('');
   const [ano, setAno] = useState('');
+  const [kmAtual, setKmAtual] = useState('');
 
-  const [pecasSelecionadas, setPecasSelecionadas] = useState<string[]>([]);
-  const [dataManutencao, setDataManutencao] = useState('');
+  // CatÃ¡logo de componentes vindo da API
+  const [componentes, setComponentes] = useState<Componente[]>([]);
+  const [pecasSelecionadas, setPecasSelecionadas] = useState<string[]>([]); // guarda a "chave" do componente
+  const [detalhes, setDetalhes] = useState<Record<string, DetalhePeca>>({});
   const [enviando, setEnviando] = useState(false);
+
+  useEffect(() => {
+    async function carregarCatalogo() {
+      try {
+        const response = await axios.get(`${API_URL}/componentes`);
+        setComponentes(response.data);
+      } catch (error: any) {
+        console.log('Erro ao carregar catÃ¡logo:', error?.message);
+      }
+    }
+    carregarCatalogo();
+  }, []);
 
   useEffect(() => {
     if (modeloReaproveitado || modelo.trim().length < 2) {
@@ -1745,10 +2368,17 @@ export default function Onboarding() {
     setModeloReaproveitado(false);
   }
 
-  function togglePeca(peca: string) {
+  function togglePeca(chave: string) {
     setPecasSelecionadas((atual) =>
-      atual.includes(peca) ? atual.filter((p) => p !== peca) : [...atual, peca]
+      atual.includes(chave) ? atual.filter((c) => c !== chave) : [...atual, chave]
     );
+  }
+
+  function atualizarDetalhe(chave: string, campo: keyof DetalhePeca, valor: string) {
+    setDetalhes((atual) => ({
+      ...atual,
+      [chave]: { data: '', km: '', ...atual[chave], [campo]: valor },
+    }));
   }
 
   async function handleContinuarModelo() {
@@ -1784,7 +2414,7 @@ export default function Onboarding() {
 
   function handleContinuarMarcaTipo() {
     if (!marca || !tipo) {
-      alert('Informe marca e tipo da bike');
+      alert('Informe a marca e selecione o tipo da bike');
       return;
     }
     setEtapa('apelido-ano');
@@ -1795,6 +2425,10 @@ export default function Onboarding() {
       alert('Preencha apelido e ano da bike');
       return;
     }
+    if (kmAtual && isNaN(parseFloat(kmAtual.replace(',', '.')))) {
+      alert('Informe a quilometragem atual apenas com nÃºmeros');
+      return;
+    }
     setEtapa('manutencao');
   }
 
@@ -1803,21 +2437,28 @@ export default function Onboarding() {
       alert('Selecione ao menos uma peÃ§a');
       return;
     }
-    setEtapa('data');
+    setEtapa('detalhes');
   }
 
-  async function finalizarCadastro(manutencoes: { peca: string; data: string }[]) {
+  async function finalizarCadastro(pecas: PecaPayload[]) {
     setEnviando(true);
     try {
-      await axios.post(`${API_URL}/bikes`, {
+      const response = await axios.post(`${API_URL}/bikes`, {
         userId,
         apelido,
         ano: parseInt(ano, 10),
         modelo,
         marca: modeloReaproveitado ? undefined : marca,
         tipo: modeloReaproveitado ? undefined : tipo,
-        manutencoes,
+        kmAtual: kmAtual ? parseFloat(kmAtual.replace(',', '.')) : 0,
+        pecas,
       });
+
+      // Guarda a bike ativa caso ainda nÃ£o exista uma
+      const jaTemBike = await AsyncStorage.getItem('@bike_id');
+      if (!jaTemBike) {
+        await AsyncStorage.setItem('@bike_id', String(response.data.id));
+      }
 
       // LÃ³gica de redirecionamento dinÃ¢mico
       if (isNovaBike) {
@@ -1826,7 +2467,6 @@ export default function Onboarding() {
       } else {
         router.replace('/(tabs)'); // Vai para a Home no primeiro login
       }
-      
     } catch (error: any) {
       console.log(error?.message);
       alert('Erro ao cadastrar a bike');
@@ -1835,15 +2475,34 @@ export default function Onboarding() {
     }
   }
 
-  function handleConcluirComData() {
-    const partes = dataManutencao.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-    if (!partes) {
-      alert('Informe a data no formato DD/MM/AAAA');
-      return;
+  function handleConcluirDetalhes() {
+    const pecas: PecaPayload[] = [];
+
+    for (const chave of pecasSelecionadas) {
+      const nome = componentes.find((c) => c.chave === chave)?.nome ?? chave;
+      const detalhe = detalhes[chave] ?? { data: '', km: '' };
+
+      const partes = detalhe.data.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+      if (!partes) {
+        alert(`Informe a data de "${nome}" no formato DD/MM/AAAA`);
+        return;
+      }
+
+      const kmTexto = detalhe.km.trim().replace(',', '.');
+      if (kmTexto && isNaN(parseFloat(kmTexto))) {
+        alert(`O km de instalaÃ§Ã£o de "${nome}" deve conter apenas nÃºmeros`);
+        return;
+      }
+
+      const [, dia, mes, anoData] = partes;
+      pecas.push({
+        chave,
+        data: `${anoData}-${mes}-${dia}`,
+        kmInstalacao: kmTexto ? parseFloat(kmTexto) : undefined,
+      });
     }
-    const [, dia, mesNum, anoNum] = partes;
-    const dataIso = `${anoNum}-${mesNum}-${dia}`;
-    finalizarCadastro(pecasSelecionadas.map((peca) => ({ peca, data: dataIso })));
+
+    finalizarCadastro(pecas);
   }
 
   return (
@@ -1889,7 +2548,20 @@ export default function Onboarding() {
           </TouchableOpacity>
           <Text style={styles.pergunta}>Modelo novo, conte mais sobre ele:</Text>
           <TextInput style={styles.input} placeholder="Marca" value={marca} onChangeText={setMarca} />
-          <TextInput style={styles.input} placeholder="Tipo (ex: MTB, Speed, Urbana)" value={tipo} onChangeText={setTipo} />
+
+          <Text style={styles.rotulo}>Tipo da bike</Text>
+          {TIPOS_BIKE.map((t) => {
+            const selecionado = tipo === t.valor;
+            return (
+              <TouchableOpacity
+                key={t.valor}
+                style={[styles.pecaItem, selecionado && styles.pecaItemSelecionada]}
+                onPress={() => setTipo(t.valor)}>
+                <Text style={selecionado ? styles.pecaTextoSelecionado : undefined}>{t.rotulo}</Text>
+              </TouchableOpacity>
+            );
+          })}
+
           <TouchableOpacity style={styles.button} onPress={handleContinuarMarcaTipo}>
             <Text style={styles.buttonText}>Continuar</Text>
           </TouchableOpacity>
@@ -1909,6 +2581,13 @@ export default function Onboarding() {
             onChangeText={setAno}
             keyboardType="numeric"
           />
+          <TextInput
+            style={styles.input}
+            placeholder="Km atual da bike (se souber)"
+            value={kmAtual}
+            onChangeText={setKmAtual}
+            keyboardType="numeric"
+          />
           <TouchableOpacity style={styles.button} onPress={handleContinuarApelidoAno}>
             <Text style={styles.buttonText}>Continuar</Text>
           </TouchableOpacity>
@@ -1917,7 +2596,7 @@ export default function Onboarding() {
 
       {etapa === 'manutencao' && (
         <View>
-          <Text style={styles.pergunta}>VocÃª fez manutenÃ§Ã£o recentemente nessa bike?</Text>
+          <Text style={styles.pergunta}>VocÃª trocou ou fez manutenÃ§Ã£o em alguma peÃ§a recentemente?</Text>
           <TouchableOpacity style={styles.button} onPress={() => setEtapa('pecas')}>
             <Text style={styles.buttonText}>Sim</Text>
           </TouchableOpacity>
@@ -1925,7 +2604,7 @@ export default function Onboarding() {
             style={[styles.button, styles.buttonSecundario]}
             onPress={() => finalizarCadastro([])}
             disabled={enviando}>
-            <Text style={styles.buttonText}>NÃ£o</Text>
+            <Text style={styles.buttonText}>{enviando ? 'Enviando...' : 'NÃ£o'}</Text>
           </TouchableOpacity>
         </View>
       )}
@@ -1933,14 +2612,17 @@ export default function Onboarding() {
       {etapa === 'pecas' && (
         <View>
           <Text style={styles.pergunta}>Em quais peÃ§as?</Text>
-          {PECAS_PADRAO.map((peca) => {
-            const selecionada = pecasSelecionadas.includes(peca);
+          {componentes.length === 0 && (
+            <Text style={styles.aviso}>Carregando a lista de peÃ§as...</Text>
+          )}
+          {componentes.map((c) => {
+            const selecionada = pecasSelecionadas.includes(c.chave);
             return (
               <TouchableOpacity
-                key={peca}
+                key={c.chave}
                 style={[styles.pecaItem, selecionada && styles.pecaItemSelecionada]}
-                onPress={() => togglePeca(peca)}>
-                <Text style={selecionada ? styles.pecaTextoSelecionado : undefined}>{peca}</Text>
+                onPress={() => togglePeca(c.chave)}>
+                <Text style={selecionada ? styles.pecaTextoSelecionado : undefined}>{c.nome}</Text>
               </TouchableOpacity>
             );
           })}
@@ -1950,17 +2632,41 @@ export default function Onboarding() {
         </View>
       )}
 
-      {etapa === 'data' && (
+      {etapa === 'detalhes' && (
         <View>
-          <Text style={styles.pergunta}>Quando foi a Ãºltima manutenÃ§Ã£o?</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="DD/MM/AAAA"
-            value={dataManutencao}
-            onChangeText={setDataManutencao}
-            keyboardType="numbers-and-punctuation"
-          />
-          <TouchableOpacity style={styles.button} onPress={handleConcluirComData} disabled={enviando}>
+          <TouchableOpacity onPress={() => setEtapa('pecas')}>
+            <Text style={styles.voltar}>â€¹ Voltar</Text>
+          </TouchableOpacity>
+          <Text style={styles.pergunta}>Quando foi feita a manutenÃ§Ã£o?</Text>
+          <Text style={styles.aviso}>
+            Se vocÃª souber o km da bike nessa data, informe tambÃ©m. Isso deixa o cÃ¡lculo de desgaste mais preciso.
+          </Text>
+
+          {pecasSelecionadas.map((chave) => {
+            const nome = componentes.find((c) => c.chave === chave)?.nome ?? chave;
+            const detalhe = detalhes[chave] ?? { data: '', km: '' };
+            return (
+              <View key={chave} style={styles.blocoPeca}>
+                <Text style={styles.rotulo}>{nome}</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Data (DD/MM/AAAA)"
+                  value={detalhe.data}
+                  onChangeText={(v) => atualizarDetalhe(chave, 'data', v)}
+                  keyboardType="numbers-and-punctuation"
+                />
+                <TextInput
+                  style={styles.input}
+                  placeholder="Km da bike nessa data (opcional)"
+                  value={detalhe.km}
+                  onChangeText={(v) => atualizarDetalhe(chave, 'km', v)}
+                  keyboardType="numeric"
+                />
+              </View>
+            );
+          })}
+
+          <TouchableOpacity style={styles.button} onPress={handleConcluirDetalhes} disabled={enviando}>
             <Text style={styles.buttonText}>{enviando ? 'Enviando...' : 'Concluir cadastro'}</Text>
           </TouchableOpacity>
         </View>
@@ -1973,6 +2679,8 @@ const styles = StyleSheet.create({
   container: { flexGrow: 1, backgroundColor: '#fff', justifyContent: 'center', padding: 20 },
   title: { fontSize: 26, fontWeight: 'bold', marginBottom: 20, textAlign: 'center' },
   pergunta: { fontSize: 18, fontWeight: '600', marginBottom: 20, textAlign: 'center' },
+  aviso: { fontSize: 13, color: '#666', marginBottom: 15, textAlign: 'center' },
+  rotulo: { fontSize: 15, fontWeight: 'bold', color: '#333', marginBottom: 8 },
   voltar: { color: '#007AFF', marginBottom: 20 },
   input: { borderWidth: 1, borderColor: '#ccc', borderRadius: 8, padding: 15, marginBottom: 15 },
   sugestoes: { marginTop: -10, marginBottom: 15, borderWidth: 1, borderColor: '#eee', borderRadius: 8 },
@@ -1983,6 +2691,7 @@ const styles = StyleSheet.create({
   pecaItem: { borderWidth: 1, borderColor: '#ccc', borderRadius: 8, padding: 15, marginBottom: 10 },
   pecaItemSelecionada: { backgroundColor: '#007AFF', borderColor: '#007AFF' },
   pecaTextoSelecionado: { color: '#fff', fontWeight: 'bold' },
+  blocoPeca: { marginBottom: 5 },
 });
 
 --- C:\Deenvolvimento\ifba\desenvolvimento\PI\ciclo\mobile\ciclo\app\_layout.tsx ---
@@ -2171,6 +2880,17 @@ export const Fonts = Platform.select({
   },
 });
 
+--- C:\Deenvolvimento\ifba\desenvolvimento\PI\ciclo\mobile\ciclo\constants\tiposBike.ts ---
+
+/* Tipos de bike padronizados (mesma lista validada na API: src/constants/tiposBike.js) */
+export const TIPOS_BIKE = [
+  { valor: 'mtb', rotulo: 'MTB' },
+  { valor: 'road', rotulo: 'Speed / Estrada' },
+  { valor: 'gravel', rotulo: 'Gravel' },
+  { valor: 'urbana', rotulo: 'Urbana' },
+  { valor: 'outra', rotulo: 'Outra' },
+];
+
 --- C:\Deenvolvimento\ifba\desenvolvimento\PI\ciclo\mobile\ciclo\hooks\use-color-scheme.ts ---
 
 export { useColorScheme } from 'react-native';
@@ -2197,6 +2917,28 @@ export function useColorScheme() {
   }
 
   return 'light';
+}
+
+--- C:\Deenvolvimento\ifba\desenvolvimento\PI\ciclo\mobile\ciclo\utils\bike.ts ---
+
+import axios from 'axios';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { API_URL } from '@/constants/api';
+
+/* Retorna o id da bike ativa. Se ainda nÃ£o estiver salvo, busca a primeira bike do usuÃ¡rio na API. */
+export async function getBikeId(): Promise<string | null> {
+  const salvo = await AsyncStorage.getItem('@bike_id');
+  if (salvo) return salvo;
+
+  const userId = await AsyncStorage.getItem('@user_id');
+  if (!userId) return null;
+
+  const { data } = await axios.get(`${API_URL}/bikes/usuario/${userId}`);
+  if (data.length > 0) {
+    await AsyncStorage.setItem('@bike_id', String(data[0].id));
+    return String(data[0].id);
+  }
+  return null;
 }
 
 --- C:\Deenvolvimento\ifba\desenvolvimento\PI\ciclo\mobile\ciclo\eslint.config.js ---
