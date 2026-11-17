@@ -4,6 +4,8 @@ import modeloBikeRoutes from './routes/modeloBikeRoutes.js';
 import bikeRoutes from './routes/bikeRoutes.js';
 import componenteRoutes from './routes/componenteRoutes.js';
 import manutencaoRoutes from './routes/manutencaoRoutes.js';
+import comunidadeRoutes from './routes/comunidadeRoutes.js';
+
 const app = express();
 
 app.use(express.json());
@@ -13,6 +15,7 @@ app.use(modeloBikeRoutes);
 app.use(bikeRoutes);
 app.use(componenteRoutes);
 app.use('/manutencoes', manutencaoRoutes);
+app.use(comunidadeRoutes);
 
 app.listen(3000, () => {
     console.log('Servidor rodando');

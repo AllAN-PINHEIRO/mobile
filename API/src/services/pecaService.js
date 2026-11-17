@@ -1,6 +1,6 @@
 import prisma from '../lib/prisma.js';
 import { normalizarTipo } from '../constants/tiposBike.js';
-/* Este arquivo calcula o estado (bom, médio, ruim) das peças de uma bike cruzando o desgaste com o catálogo de referência */
+import comunidadeService from './comunidadeService.js';
 
 /* Nomes usados no onboarding antigo, para ligar peças já cadastradas ao catálogo */
 const NOMES_LEGADOS = {
@@ -12,7 +12,7 @@ const NOMES_LEGADOS = {
     'Rolamentos (Movimento Central)': 'movimento-central'
 };
 
-/*garante que a bike tenha uma peça para cada componente do catálogo (cobre bikes cadastradas antes do catálogo)*/
+/* Garante que a bike tenha uma peça para cada componente do catálogo */
 async function sincronizarPecas(bikeId) {
     const [bike, componentes, pecas] = await Promise.all([
         prisma.bike.findUnique({ where: { id: bikeId } }),
@@ -26,7 +26,6 @@ async function sincronizarPecas(bikeId) {
         if (!componente) continue;
 
         const data = { componenteId: componente.id, nome: componente.nome };
-        // peça com manutenção informada e sem km de instalação: assume que foi feita no km atual
         if (peca.ultimaManutencao && peca.kmInstalacao === 0) {
             data.kmInstalacao = bike.kmAtual;
         }
@@ -49,7 +48,7 @@ async function sincronizarPecas(bikeId) {
     }
 }
 
-/*escolho a faixa de vida útil conforme o tipo da bike: MTB e Road têm faixa própria, os demais usam a genérica*/
+/* Escolhe a faixa de vida útil oficial conforme o tipo da bike */
 function limitesDoComponente(componente, tipo) {
     let min = componente.vidaMin;
     let max = componente.vidaMax;
@@ -67,29 +66,53 @@ function limitesDoComponente(componente, tipo) {
     return { min, max };
 }
 
-function mesesDesde(data) {
-    return (Date.now() - new Date(data).getTime()) / (1000 * 60 * 60 * 24 * 30.4375);
+function mesesEntre(dataInicio, dataFim = new Date()) {
+    return (new Date(dataFim).getTime() - new Date(dataInicio).getTime()) / (1000 * 60 * 60 * 24 * 30.4375);
 }
 
-/*bom: abaixo de min | medio: entre min e max | ruim: a partir de max*/
-function calcularStatus(peca, bike, componente) {
+/* Calcula o status oficial e o status pela média dinâmica da comunidade usando os mesmos critérios */
+function calcularStatus(peca, bike, componente, mediaComunidade) {
     const tipo = normalizarTipo(bike.modeloBike?.tipo);
     const limites = limitesDoComponente(componente, tipo);
 
     let desgaste;
     if (componente.unidade === 'meses') {
         const base = peca.ultimaManutencao ?? peca.criadaEm;
-        desgaste = base ? mesesDesde(base) : 0;
+        desgaste = base ? mesesEntre(base) : 0;
     } else {
         desgaste = Math.max(0, bike.kmAtual - peca.kmInstalacao);
     }
 
+    // 1. Cálculo Padrão (Referência Oficial)
     let status = 'bom';
     let vidaRestante = 100;
     if (limites) {
         vidaRestante = Math.max(0, Math.round(100 - (desgaste / limites.max) * 100));
         if (desgaste >= limites.max) status = 'ruim';
         else if (desgaste >= limites.min) status = 'medio';
+    }
+
+    // 2. Cálculo Comunidade (Média dinâmica dos usuários para o mesmo tipo de bike)
+    let comunidade = null;
+    if (mediaComunidade && mediaComunidade.totalTrocas > 0 && mediaComunidade.mediaVidaUtil > 0) {
+        const comMax = mediaComunidade.mediaVidaUtil;
+        const comMin = comMax * 0.75; // Mesmo critério de 75% para faixa de atenção
+        const comVidaRestante = Math.max(0, Math.round(100 - (desgaste / comMax) * 100));
+
+        let comStatus = 'bom';
+        if (desgaste >= comMax) comStatus = 'ruim';
+        else if (desgaste >= comMin) comStatus = 'medio';
+
+        comunidade = {
+            tipoBike: tipo,
+            totalTrocas: mediaComunidade.totalTrocas,
+            limiteMin: Math.round(comMin * 10) / 10,
+            limiteMax: Math.round(comMax * 10) / 10,
+            menorDuracao: mediaComunidade.menorDuracao != null ? Math.round(mediaComunidade.menorDuracao * 10) / 10 : null,
+            maiorDuracao: mediaComunidade.maiorDuracao != null ? Math.round(mediaComunidade.maiorDuracao * 10) / 10 : null,
+            vidaRestante: comVidaRestante,
+            status: comStatus
+        };
     }
 
     return {
@@ -102,6 +125,7 @@ function calcularStatus(peca, bike, componente) {
         limiteMax: limites?.max ?? null,
         vidaRestante,
         status,
+        comunidade,
         sinaisDesgaste: componente.sinaisDesgaste,
         observacao: componente.observacao ?? null,
         fonte: componente.fonte
@@ -117,36 +141,76 @@ async function getStatusByBike(bikeId) {
     });
     if (!bike) return null;
 
-    const pecas = await prisma.peca.findMany({
-        where: { bikeId, componenteId: { not: null } },
-        include: { componente: true }
-    });
+    const tipoBike = normalizarTipo(bike.modeloBike?.tipo);
+
+    const [pecas, mediasComunidade] = await Promise.all([
+        prisma.peca.findMany({
+            where: { bikeId, componenteId: { not: null } },
+            include: { componente: true }
+        }),
+        prisma.mediaComunidade.findMany({
+            where: { tipoBike }
+        })
+    ]);
+
+    const mapaComunidade = new Map(mediasComunidade.map((m) => [m.componenteId, m]));
 
     const status = pecas
         .filter((p) => p.componente)
         .sort((a, b) => a.componente.ordem - b.componente.ordem)
-        .map((p) => calcularStatus(p, bike, p.componente));
+        .map((p) => calcularStatus(p, bike, p.componente, mapaComunidade.get(p.componenteId)));
 
     return {
         bike: {
             id: bike.id,
             apelido: bike.apelido,
             kmAtual: bike.kmAtual,
-            tipo: normalizarTipo(bike.modeloBike?.tipo)
+            tipo: tipoBike
         },
         pecas: status
     };
 }
 
-/*registro a troca: a peça passa a contar o desgaste a partir do km e da data informados*/
+/* Registra a troca: calcula quanto a peça anterior durou para a média da comunidade e reinicia o desgaste */
 async function registrarTroca({ bikeId, componenteChave, km, data }) {
     await sincronizarPecas(bikeId);
 
-    const componente = await prisma.componenteReferencia.findUnique({ where: { chave: componenteChave } });
-    if (!componente) return null;
+    const [bike, componente] = await Promise.all([
+        prisma.bike.findUnique({
+            where: { id: bikeId },
+            include: { modeloBike: true }
+        }),
+        prisma.componenteReferencia.findUnique({
+            where: { chave: componenteChave }
+        })
+    ]);
 
-    const peca = await prisma.peca.findFirst({ where: { bikeId, componenteId: componente.id } });
+    if (!bike || !componente) return null;
+
+    const peca = await prisma.peca.findFirst({
+        where: { bikeId, componenteId: componente.id }
+    });
     if (!peca) return null;
+
+    // Calcula quanto a peça substituída durou antes de zerar os contadores
+    let duracaoReal = 0;
+    if (componente.unidade === 'meses') {
+        const base = peca.ultimaManutencao ?? peca.criadaEm;
+        if (base) {
+            duracaoReal = mesesEntre(base, data);
+        }
+    } else {
+        duracaoReal = Number(km) - peca.kmInstalacao;
+    }
+
+    if (duracaoReal > 0) {
+        await comunidadeService.registrarAmostra({
+            componenteId: componente.id,
+            tipoBike: bike.modeloBike?.tipo,
+            unidade: componente.unidade,
+            duracao: duracaoReal
+        });
+    }
 
     return await prisma.peca.update({
         where: { id: peca.id },
