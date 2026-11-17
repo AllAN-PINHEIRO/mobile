@@ -7,73 +7,92 @@ import { API_URL } from '@/constants/api';
 import { getBikeId } from '@/utils/bike';
 
 type TipoManutencao = 'rotina' | 'troca';
+type ModoKm = 'somar' | 'total';
 type Componente = { id: string; chave: string; nome: string };
 
 export default function CadastroManutencao() {
   const router = useRouter();
-  
+
   const [tipo, setTipo] = useState<TipoManutencao>('rotina');
-  
-  // Estados para o formulário
+  const [modoKm, setModoKm] = useState<ModoKm>('somar');
+  const [odometroBike, setOdometroBike] = useState<number>(0);
+
   const [data, setData] = useState('');
-  const [kmAtual, setKmAtual] = useState(''); // <-- Novo estado para o KM
+  const [kmAtual, setKmAtual] = useState('0');
   const [descricao, setDescricao] = useState('');
-  
-  // Estados específicos para "Troca de Peça"
+
   const [componentes, setComponentes] = useState<Componente[]>([]);
   const [componenteChave, setComponenteChave] = useState('');
   const [marcaNova, setMarcaNova] = useState('');
 
   const [enviando, setEnviando] = useState(false);
 
-  // Carrega o catálogo de componentes para escolher o que foi trocado
   useEffect(() => {
-    async function carregarCatalogo() {
+    async function carregarDados() {
       try {
-        const response = await axios.get(`${API_URL}/componentes`);
-        setComponentes(response.data);
+        const bikeId = await getBikeId();
+        const [compRes, pecasRes] = await Promise.all([
+          axios.get(`${API_URL}/componentes`),
+          bikeId ? axios.get(`${API_URL}/bikes/${bikeId}/pecas`) : Promise.resolve(null),
+        ]);
+
+        setComponentes(compRes.data);
+        if (pecasRes?.data?.bike?.kmAtual != null) {
+          setOdometroBike(Number(pecasRes.data.bike.kmAtual) || 0);
+        }
       } catch (error: any) {
-        console.log('Erro ao carregar catálogo:', error?.message);
+        console.log('Erro ao carregar dados:', error?.message);
       }
     }
-    carregarCatalogo();
+    carregarDados();
   }, []);
 
+  function alternarModoKm(novoModo: ModoKm) {
+    setModoKm(novoModo);
+    setKmAtual(novoModo === 'total' ? String(Number(odometroBike.toFixed(2))) : '0');
+  }
+
   async function handleSalvar() {
-    if (!data || !kmAtual) {
+    if (!data || kmAtual === '') {
       alert('Informe a data e a quilometragem da manutenção.');
       return;
     }
-    
+
     if (tipo === 'troca' && !componenteChave) {
       alert('Informe qual peça foi trocada.');
+      return;
+    }
+
+    const valorDigitado = parseFloat(kmAtual.replace(',', '.'));
+    if (isNaN(valorDigitado) || valorDigitado < 0) {
+      alert('Informe a quilometragem apenas com números válidos.');
+      return;
+    }
+
+    const kmFinal =
+      modoKm === 'somar'
+        ? Number((odometroBike + valorDigitado).toFixed(2))
+        : Number(valorDigitado.toFixed(2));
+
+    if (kmFinal < odometroBike) {
+      alert(`O odômetro total não pode ser menor que o atual da bike (${odometroBike} km).`);
       return;
     }
 
     setEnviando(true);
 
     try {
-      // Pega o ID da bike ativa (se não estiver salvo, busca a primeira bike do usuário na API)
       const bikeId = await getBikeId();
-      
       if (!bikeId) {
         alert('Erro: Nenhuma bike selecionada.');
         setEnviando(false);
         return;
       }
-      
-      // Converte a data string DD/MM/AAAA para formato ISO (AAAA-MM-DD)
+
       const partesData = data.split('/');
-      let dataIso = new Date().toISOString(); // fallback para hoje
+      let dataIso = new Date().toISOString();
       if (partesData.length === 3) {
         dataIso = new Date(`${partesData[2]}-${partesData[1]}-${partesData[0]}T12:00:00Z`).toISOString();
-      }
-
-      const km = parseFloat(kmAtual.replace(',', '.'));
-      if (isNaN(km)) {
-        alert('Informe a quilometragem apenas com números.');
-        setEnviando(false);
-        return;
       }
 
       const nomePeca = componentes.find((c) => c.chave === componenteChave)?.nome ?? '';
@@ -81,19 +100,20 @@ export default function CadastroManutencao() {
       const payload = {
         bikeId,
         tipo,
-        km,
+        km: kmFinal,
         titulo: tipo === 'troca' ? `Troca de ${nomePeca}` : 'Manutenção de Rotina',
-        descricao: tipo === 'troca'
-          ? `Peça: ${nomePeca}. Marca: ${marcaNova || 'Não informada'}. ${descricao}`
-          : descricao,
+        descricao:
+          tipo === 'troca'
+            ? `Peça: ${nomePeca}. Marca: ${marcaNova || 'Não informada'}. ${descricao}`
+            : descricao,
         data: dataIso,
         componenteChave: tipo === 'troca' ? componenteChave : undefined,
       };
 
       await axios.post(`${API_URL}/manutencoes`, payload);
 
-      alert('Manutenção registrada com sucesso!');
-      router.back(); // Volta para a tela de histórico, que vai recarregar a lista
+      alert(`Manutenção registrada! Odômetro atualizado para ${kmFinal} km.`);
+      router.back();
     } catch (error: any) {
       console.log('Erro ao salvar:', error?.message);
       alert('Erro ao salvar a manutenção no servidor.');
@@ -113,15 +133,14 @@ export default function CadastroManutencao() {
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent}>
-        
         <View style={styles.selectorContainer}>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={[styles.selectorButton, tipo === 'rotina' && styles.selectorButtonActive]}
             onPress={() => setTipo('rotina')}
           >
             <Text style={[styles.selectorText, tipo === 'rotina' && styles.selectorTextActive]}>Rotina</Text>
           </TouchableOpacity>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={[styles.selectorButton, tipo === 'troca' && styles.selectorButtonActive]}
             onPress={() => setTipo('troca')}
           >
@@ -129,30 +148,47 @@ export default function CadastroManutencao() {
           </TouchableOpacity>
         </View>
 
-        <View style={styles.row}>
-          <View style={styles.flex1}>
-            <Text style={styles.label}>Data</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="DD/MM/AAAA"
-              value={data}
-              onChangeText={setData}
-              keyboardType="numbers-and-punctuation"
-            />
-          </View>
-          <View style={{ width: 15 }} />
-          <View style={styles.flex1}>
-            <Text style={styles.label}>KM da Bike</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Ex: 1250"
-              value={kmAtual}
-              onChangeText={setKmAtual}
-              keyboardType="numeric"
-            />
-          </View>
+        <Text style={styles.label}>Data</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="DD/MM/AAAA"
+          value={data}
+          onChangeText={setData}
+          keyboardType="numbers-and-punctuation"
+        />
+
+        <View style={styles.kmHeaderRow}>
+          <Text style={styles.label}>Quilometragem</Text>
+          <Text style={styles.odometroAtualBadge}>Atual: {Number(odometroBike.toFixed(2))} km</Text>
         </View>
-        
+
+        <View style={styles.modoKmContainer}>
+          <TouchableOpacity
+            style={[styles.modoKmBtn, modoKm === 'somar' && styles.modoKmBtnAtivo]}
+            onPress={() => alternarModoKm('somar')}
+          >
+            <Text style={[styles.modoKmText, modoKm === 'somar' && styles.modoKmTextAtivo]}>
+              + Somar KM
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.modoKmBtn, modoKm === 'total' && styles.modoKmBtnAtivo]}
+            onPress={() => alternarModoKm('total')}
+          >
+            <Text style={[styles.modoKmText, modoKm === 'total' && styles.modoKmTextAtivo]}>
+              Odômetro Total
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        <TextInput
+          style={styles.input}
+          placeholder={modoKm === 'somar' ? 'Ex: 50 (km rodados desde o último registro)' : 'Ex: 150 (total da bike)'}
+          value={kmAtual}
+          onChangeText={setKmAtual}
+          keyboardType="numeric"
+        />
+
         {tipo === 'troca' ? (
           <View style={styles.cardDestaque}>
             <Text style={styles.labelDestaque}>O que foi trocado?</Text>
@@ -183,20 +219,17 @@ export default function CadastroManutencao() {
         <Text style={styles.label}>Descrição / Observações</Text>
         <TextInput
           style={[styles.input, styles.textArea]}
-          placeholder={tipo === 'rotina' ? "Ex: Lubrificação da corrente." : "Motivo da troca."}
+          placeholder={tipo === 'rotina' ? 'Ex: Lubrificação da corrente.' : 'Motivo da troca.'}
           value={descricao}
           onChangeText={setDescricao}
-          multiline numberOfLines={4} textAlignVertical="top"
+          multiline
+          numberOfLines={4}
+          textAlignVertical="top"
         />
 
         <TouchableOpacity style={styles.saveButton} onPress={handleSalvar} disabled={enviando}>
-          {enviando ? (
-             <ActivityIndicator color="#fff" />
-          ) : (
-             <Text style={styles.saveButtonText}>Salvar Registro</Text>
-          )}
+          {enviando ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveButtonText}>Salvar Registro</Text>}
         </TouchableOpacity>
-
       </ScrollView>
     </View>
   );
@@ -208,14 +241,19 @@ const styles = StyleSheet.create({
   backButton: { padding: 5 },
   title: { fontSize: 20, fontWeight: 'bold', color: '#333' },
   scrollContent: { padding: 20 },
-  selectorContainer: { flexDirection: 'row', backgroundColor: '#EAEAEA', borderRadius: 8, padding: 4, marginBottom: 25 },
+  selectorContainer: { flexDirection: 'row', backgroundColor: '#EAEAEA', borderRadius: 8, padding: 4, marginBottom: 20 },
   selectorButton: { flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 6 },
   selectorButtonActive: { backgroundColor: '#fff', shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2, elevation: 2 },
   selectorText: { color: '#666', fontWeight: '600' },
   selectorTextActive: { color: '#007AFF', fontWeight: 'bold' },
-  row: { flexDirection: 'row', justifyContent: 'space-between' },
-  flex1: { flex: 1 },
   label: { fontSize: 16, fontWeight: 'bold', color: '#333', marginBottom: 8 },
+  kmHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+  odometroAtualBadge: { fontSize: 13, fontWeight: '600', color: '#007AFF' },
+  modoKmContainer: { flexDirection: 'row', backgroundColor: '#EAEAEA', borderRadius: 8, padding: 3, marginBottom: 10 },
+  modoKmBtn: { flex: 1, paddingVertical: 8, alignItems: 'center', borderRadius: 6 },
+  modoKmBtnAtivo: { backgroundColor: '#fff' },
+  modoKmText: { fontSize: 13, fontWeight: '600', color: '#666' },
+  modoKmTextAtivo: { color: '#007AFF', fontWeight: 'bold' },
   input: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#ccc', borderRadius: 8, padding: 15, marginBottom: 15, fontSize: 16 },
   textArea: { height: 100 },
   cardDestaque: { backgroundColor: '#E5F1FF', padding: 15, borderRadius: 12, marginBottom: 15, borderWidth: 1, borderColor: '#B3D4FF' },
