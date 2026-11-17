@@ -2,30 +2,24 @@ import axios from 'axios';
 import { useEffect, useState } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { API_URL } from '@/constants/api';
+import { TIPOS_BIKE } from '@/constants/tiposBike';
 
 type ModeloSugestao = { id: string; modelo: string; marca: string; tipo: string };
+type Componente = { id: string; chave: string; nome: string };
+type DetalhePeca = { data: string; km: string };
+type PecaPayload = { chave: string; data: string; kmInstalacao?: number };
 
-const PECAS_PADRAO = [
-  'Corrente',
-  'Cassete/Coroa',
-  'Pastilhas de Freio',
-  'Pneus/Câmaras',
-  'Amortecedor/Suspensão',
-  'Rolamentos (Movimento Central)',
-  'Cabos de Câmbio e Freio',
-  'Correia de Transmissão',
-];
-
-type Etapa = 'modelo' | 'marca-tipo' | 'apelido-ano' | 'manutencao' | 'pecas' | 'data';
+type Etapa = 'modelo' | 'marca-tipo' | 'apelido-ano' | 'manutencao' | 'pecas' | 'detalhes';
 
 export default function Onboarding() {
   const router = useRouter();
-  
+
   // Captura o userId e a nova variável "origem" para saber de onde o usuário veio
   const { userId, origem } = useLocalSearchParams<{ userId: string; origem?: string }>();
-  
+
   // Variável que verifica se é um cadastro de uma nova bike vindo da tela de perfil
   const isNovaBike = origem === 'minhas-bikes';
 
@@ -39,10 +33,25 @@ export default function Onboarding() {
   const [verificandoModelo, setVerificandoModelo] = useState(false);
   const [apelido, setApelido] = useState('');
   const [ano, setAno] = useState('');
+  const [kmAtual, setKmAtual] = useState('');
 
-  const [pecasSelecionadas, setPecasSelecionadas] = useState<string[]>([]);
-  const [dataManutencao, setDataManutencao] = useState('');
+  // Catálogo de componentes vindo da API
+  const [componentes, setComponentes] = useState<Componente[]>([]);
+  const [pecasSelecionadas, setPecasSelecionadas] = useState<string[]>([]); // guarda a "chave" do componente
+  const [detalhes, setDetalhes] = useState<Record<string, DetalhePeca>>({});
   const [enviando, setEnviando] = useState(false);
+
+  useEffect(() => {
+    async function carregarCatalogo() {
+      try {
+        const response = await axios.get(`${API_URL}/componentes`);
+        setComponentes(response.data);
+      } catch (error: any) {
+        console.log('Erro ao carregar catálogo:', error?.message);
+      }
+    }
+    carregarCatalogo();
+  }, []);
 
   useEffect(() => {
     if (modeloReaproveitado || modelo.trim().length < 2) {
@@ -73,10 +82,17 @@ export default function Onboarding() {
     setModeloReaproveitado(false);
   }
 
-  function togglePeca(peca: string) {
+  function togglePeca(chave: string) {
     setPecasSelecionadas((atual) =>
-      atual.includes(peca) ? atual.filter((p) => p !== peca) : [...atual, peca]
+      atual.includes(chave) ? atual.filter((c) => c !== chave) : [...atual, chave]
     );
+  }
+
+  function atualizarDetalhe(chave: string, campo: keyof DetalhePeca, valor: string) {
+    setDetalhes((atual) => ({
+      ...atual,
+      [chave]: { data: '', km: '', ...atual[chave], [campo]: valor },
+    }));
   }
 
   async function handleContinuarModelo() {
@@ -112,7 +128,7 @@ export default function Onboarding() {
 
   function handleContinuarMarcaTipo() {
     if (!marca || !tipo) {
-      alert('Informe marca e tipo da bike');
+      alert('Informe a marca e selecione o tipo da bike');
       return;
     }
     setEtapa('apelido-ano');
@@ -123,6 +139,10 @@ export default function Onboarding() {
       alert('Preencha apelido e ano da bike');
       return;
     }
+    if (kmAtual && isNaN(parseFloat(kmAtual.replace(',', '.')))) {
+      alert('Informe a quilometragem atual apenas com números');
+      return;
+    }
     setEtapa('manutencao');
   }
 
@@ -131,21 +151,28 @@ export default function Onboarding() {
       alert('Selecione ao menos uma peça');
       return;
     }
-    setEtapa('data');
+    setEtapa('detalhes');
   }
 
-  async function finalizarCadastro(manutencoes: { peca: string; data: string }[]) {
+  async function finalizarCadastro(pecas: PecaPayload[]) {
     setEnviando(true);
     try {
-      await axios.post(`${API_URL}/bikes`, {
+      const response = await axios.post(`${API_URL}/bikes`, {
         userId,
         apelido,
         ano: parseInt(ano, 10),
         modelo,
         marca: modeloReaproveitado ? undefined : marca,
         tipo: modeloReaproveitado ? undefined : tipo,
-        manutencoes,
+        kmAtual: kmAtual ? parseFloat(kmAtual.replace(',', '.')) : 0,
+        pecas,
       });
+
+      // Guarda a bike ativa caso ainda não exista uma
+      const jaTemBike = await AsyncStorage.getItem('@bike_id');
+      if (!jaTemBike) {
+        await AsyncStorage.setItem('@bike_id', String(response.data.id));
+      }
 
       // Lógica de redirecionamento dinâmico
       if (isNovaBike) {
@@ -154,7 +181,6 @@ export default function Onboarding() {
       } else {
         router.replace('/(tabs)'); // Vai para a Home no primeiro login
       }
-      
     } catch (error: any) {
       console.log(error?.message);
       alert('Erro ao cadastrar a bike');
@@ -163,15 +189,34 @@ export default function Onboarding() {
     }
   }
 
-  function handleConcluirComData() {
-    const partes = dataManutencao.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-    if (!partes) {
-      alert('Informe a data no formato DD/MM/AAAA');
-      return;
+  function handleConcluirDetalhes() {
+    const pecas: PecaPayload[] = [];
+
+    for (const chave of pecasSelecionadas) {
+      const nome = componentes.find((c) => c.chave === chave)?.nome ?? chave;
+      const detalhe = detalhes[chave] ?? { data: '', km: '' };
+
+      const partes = detalhe.data.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+      if (!partes) {
+        alert(`Informe a data de "${nome}" no formato DD/MM/AAAA`);
+        return;
+      }
+
+      const kmTexto = detalhe.km.trim().replace(',', '.');
+      if (kmTexto && isNaN(parseFloat(kmTexto))) {
+        alert(`O km de instalação de "${nome}" deve conter apenas números`);
+        return;
+      }
+
+      const [, dia, mes, anoData] = partes;
+      pecas.push({
+        chave,
+        data: `${anoData}-${mes}-${dia}`,
+        kmInstalacao: kmTexto ? parseFloat(kmTexto) : undefined,
+      });
     }
-    const [, dia, mesNum, anoNum] = partes;
-    const dataIso = `${anoNum}-${mesNum}-${dia}`;
-    finalizarCadastro(pecasSelecionadas.map((peca) => ({ peca, data: dataIso })));
+
+    finalizarCadastro(pecas);
   }
 
   return (
@@ -217,7 +262,20 @@ export default function Onboarding() {
           </TouchableOpacity>
           <Text style={styles.pergunta}>Modelo novo, conte mais sobre ele:</Text>
           <TextInput style={styles.input} placeholder="Marca" value={marca} onChangeText={setMarca} />
-          <TextInput style={styles.input} placeholder="Tipo (ex: MTB, Speed, Urbana)" value={tipo} onChangeText={setTipo} />
+
+          <Text style={styles.rotulo}>Tipo da bike</Text>
+          {TIPOS_BIKE.map((t) => {
+            const selecionado = tipo === t.valor;
+            return (
+              <TouchableOpacity
+                key={t.valor}
+                style={[styles.pecaItem, selecionado && styles.pecaItemSelecionada]}
+                onPress={() => setTipo(t.valor)}>
+                <Text style={selecionado ? styles.pecaTextoSelecionado : undefined}>{t.rotulo}</Text>
+              </TouchableOpacity>
+            );
+          })}
+
           <TouchableOpacity style={styles.button} onPress={handleContinuarMarcaTipo}>
             <Text style={styles.buttonText}>Continuar</Text>
           </TouchableOpacity>
@@ -237,6 +295,13 @@ export default function Onboarding() {
             onChangeText={setAno}
             keyboardType="numeric"
           />
+          <TextInput
+            style={styles.input}
+            placeholder="Km atual da bike (se souber)"
+            value={kmAtual}
+            onChangeText={setKmAtual}
+            keyboardType="numeric"
+          />
           <TouchableOpacity style={styles.button} onPress={handleContinuarApelidoAno}>
             <Text style={styles.buttonText}>Continuar</Text>
           </TouchableOpacity>
@@ -245,7 +310,7 @@ export default function Onboarding() {
 
       {etapa === 'manutencao' && (
         <View>
-          <Text style={styles.pergunta}>Você fez manutenção recentemente nessa bike?</Text>
+          <Text style={styles.pergunta}>Você trocou ou fez manutenção em alguma peça recentemente?</Text>
           <TouchableOpacity style={styles.button} onPress={() => setEtapa('pecas')}>
             <Text style={styles.buttonText}>Sim</Text>
           </TouchableOpacity>
@@ -253,7 +318,7 @@ export default function Onboarding() {
             style={[styles.button, styles.buttonSecundario]}
             onPress={() => finalizarCadastro([])}
             disabled={enviando}>
-            <Text style={styles.buttonText}>Não</Text>
+            <Text style={styles.buttonText}>{enviando ? 'Enviando...' : 'Não'}</Text>
           </TouchableOpacity>
         </View>
       )}
@@ -261,14 +326,17 @@ export default function Onboarding() {
       {etapa === 'pecas' && (
         <View>
           <Text style={styles.pergunta}>Em quais peças?</Text>
-          {PECAS_PADRAO.map((peca) => {
-            const selecionada = pecasSelecionadas.includes(peca);
+          {componentes.length === 0 && (
+            <Text style={styles.aviso}>Carregando a lista de peças...</Text>
+          )}
+          {componentes.map((c) => {
+            const selecionada = pecasSelecionadas.includes(c.chave);
             return (
               <TouchableOpacity
-                key={peca}
+                key={c.chave}
                 style={[styles.pecaItem, selecionada && styles.pecaItemSelecionada]}
-                onPress={() => togglePeca(peca)}>
-                <Text style={selecionada ? styles.pecaTextoSelecionado : undefined}>{peca}</Text>
+                onPress={() => togglePeca(c.chave)}>
+                <Text style={selecionada ? styles.pecaTextoSelecionado : undefined}>{c.nome}</Text>
               </TouchableOpacity>
             );
           })}
@@ -278,17 +346,41 @@ export default function Onboarding() {
         </View>
       )}
 
-      {etapa === 'data' && (
+      {etapa === 'detalhes' && (
         <View>
-          <Text style={styles.pergunta}>Quando foi a última manutenção?</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="DD/MM/AAAA"
-            value={dataManutencao}
-            onChangeText={setDataManutencao}
-            keyboardType="numbers-and-punctuation"
-          />
-          <TouchableOpacity style={styles.button} onPress={handleConcluirComData} disabled={enviando}>
+          <TouchableOpacity onPress={() => setEtapa('pecas')}>
+            <Text style={styles.voltar}>‹ Voltar</Text>
+          </TouchableOpacity>
+          <Text style={styles.pergunta}>Quando foi feita a manutenção?</Text>
+          <Text style={styles.aviso}>
+            Se você souber o km da bike nessa data, informe também. Isso deixa o cálculo de desgaste mais preciso.
+          </Text>
+
+          {pecasSelecionadas.map((chave) => {
+            const nome = componentes.find((c) => c.chave === chave)?.nome ?? chave;
+            const detalhe = detalhes[chave] ?? { data: '', km: '' };
+            return (
+              <View key={chave} style={styles.blocoPeca}>
+                <Text style={styles.rotulo}>{nome}</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Data (DD/MM/AAAA)"
+                  value={detalhe.data}
+                  onChangeText={(v) => atualizarDetalhe(chave, 'data', v)}
+                  keyboardType="numbers-and-punctuation"
+                />
+                <TextInput
+                  style={styles.input}
+                  placeholder="Km da bike nessa data (opcional)"
+                  value={detalhe.km}
+                  onChangeText={(v) => atualizarDetalhe(chave, 'km', v)}
+                  keyboardType="numeric"
+                />
+              </View>
+            );
+          })}
+
+          <TouchableOpacity style={styles.button} onPress={handleConcluirDetalhes} disabled={enviando}>
             <Text style={styles.buttonText}>{enviando ? 'Enviando...' : 'Concluir cadastro'}</Text>
           </TouchableOpacity>
         </View>
@@ -301,6 +393,8 @@ const styles = StyleSheet.create({
   container: { flexGrow: 1, backgroundColor: '#fff', justifyContent: 'center', padding: 20 },
   title: { fontSize: 26, fontWeight: 'bold', marginBottom: 20, textAlign: 'center' },
   pergunta: { fontSize: 18, fontWeight: '600', marginBottom: 20, textAlign: 'center' },
+  aviso: { fontSize: 13, color: '#666', marginBottom: 15, textAlign: 'center' },
+  rotulo: { fontSize: 15, fontWeight: 'bold', color: '#333', marginBottom: 8 },
   voltar: { color: '#007AFF', marginBottom: 20 },
   input: { borderWidth: 1, borderColor: '#ccc', borderRadius: 8, padding: 15, marginBottom: 15 },
   sugestoes: { marginTop: -10, marginBottom: 15, borderWidth: 1, borderColor: '#eee', borderRadius: 8 },
@@ -311,4 +405,5 @@ const styles = StyleSheet.create({
   pecaItem: { borderWidth: 1, borderColor: '#ccc', borderRadius: 8, padding: 15, marginBottom: 10 },
   pecaItemSelecionada: { backgroundColor: '#007AFF', borderColor: '#007AFF' },
   pecaTextoSelecionado: { color: '#fff', fontWeight: 'bold' },
+  blocoPeca: { marginBottom: 5 },
 });

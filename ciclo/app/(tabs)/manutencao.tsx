@@ -1,70 +1,115 @@
-import React from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, DimensionValue, Dimensions } from 'react-native';
+import React, { useCallback, useState } from 'react';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, DimensionValue, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
+import axios from 'axios';
 
-// Dados simulados para o design. 
-// Futuramente, esses dados virão da sua API cruzando o odômetro da bike com a tabela de "valores médios".
-const pecasSimuladas = [
-  { id: '1', nome: 'Corrente', kmRodado: 1200, kmLimite: 2500, icone: 'link-outline' },
-  { id: '2', nome: 'Pneu Traseiro', kmRodado: 4800, kmLimite: 5000, icone: 'disc-outline' },
-  { id: '3', nome: 'Pneu Dianteiro', kmRodado: 1500, kmLimite: 5000, icone: 'disc-outline' },
-  { id: '4', nome: 'Pastilha de Freio', kmRodado: 1200, kmLimite: 1500, icone: 'stop-circle-outline' },
-  { id: '5', nome: 'Cassete', kmRodado: 3500, kmLimite: 10000, icone: 'cog-outline' },
-];
+import { API_URL } from '@/constants/api';
+import { getBikeId } from '@/utils/bike';
+
+type StatusPeca = 'bom' | 'medio' | 'ruim';
+
+type PecaStatus = {
+  id: string;
+  chave: string;
+  nome: string;
+  unidade: 'km' | 'meses';
+  desgaste: number;
+  limiteMax: number | null;
+  vidaRestante: number;
+  status: StatusPeca;
+  sinaisDesgaste: string;
+  observacao: string | null;
+};
+
+// Ícone de cada componente do catálogo
+const ICONES: Record<string, string> = {
+  corrente: 'link-outline',
+  cassete: 'cog-outline',
+  coroas: 'cog-outline',
+  pneus: 'disc-outline',
+  pastilhas: 'stop-circle-outline',
+  discos: 'ellipse-outline',
+  'movimento-central': 'sync-outline',
+  suspensao: 'swap-vertical-outline',
+  quadro: 'cube-outline',
+};
+
+// Cor e texto de cada estado calculado pela API
+const ESTADOS: Record<StatusPeca, { cor: string; texto: string }> = {
+  bom: { cor: '#34C759', texto: 'Em bom estado' },
+  medio: { cor: '#FF9500', texto: 'Planejar troca' },
+  ruim: { cor: '#FF3B30', texto: 'Troca urgente' },
+};
 
 export default function Manutencao() {
-  const router = useRouter()
-  
-  
-  // mudando statuzinhos massas
-  const getStatusSaude = (kmRodado: number, kmLimite: number) => {
-    const porcentagemGasta = (kmRodado / kmLimite) * 100;
-    const saudeRestante = Math.max(0, 100 - porcentagemGasta); // Garante que não fique negativo
+  const router = useRouter();
+  const [pecas, setPecas] = useState<PecaStatus[]>([]);
+  const [carregando, setCarregando] = useState(true);
+  const [erro, setErro] = useState('');
 
-    let cor = '#34C759'; 
-    let status = 'Em bom estado';
-
-    if (saudeRestante <= 15) {
-      cor = '#FF3B30'; 
-      status = 'Troca urgente';
-    } else if (saudeRestante <= 40) {
-      cor = '#FF9500'; 
-      status = 'Planejar troca';
+  // Busca o estado das peças da bike ativa sempre que a tela volta ao foco
+  const carregarPecas = useCallback(async () => {
+    try {
+      setErro('');
+      const bikeId = await getBikeId();
+      if (!bikeId) {
+        setPecas([]);
+        setErro('Nenhuma bike cadastrada.');
+        return;
+      }
+      const response = await axios.get(`${API_URL}/bikes/${bikeId}/pecas`);
+      setPecas(response.data.pecas);
+    } catch (error: any) {
+      console.log('Erro ao carregar peças:', error?.message);
+      setErro('Não foi possível carregar o estado das peças.');
+    } finally {
+      setCarregando(false);
     }
+  }, []);
 
-    return { saudeRestante: saudeRestante.toFixed(0), cor, status };
-  };
+  useFocusEffect(
+    useCallback(() => {
+      carregarPecas();
+    }, [carregarPecas])
+  );
 
-  const renderPeca = ({ item }: { item: any }) => {
-    const { saudeRestante, cor, status } = getStatusSaude(item.kmRodado, item.kmLimite);
+  const renderPeca = ({ item }: { item: PecaStatus }) => {
+    const { cor, texto } = ESTADOS[item.status];
+    const unidade = item.unidade === 'km' ? 'km' : 'meses';
+    const uso = item.limiteMax != null
+      ? `Uso: ${Math.round(item.desgaste)} / ${Math.round(item.limiteMax)} ${unidade}`
+      : `Uso: ${Math.round(item.desgaste)} ${unidade}`;
 
     return (
       <View style={styles.card}>
         <View style={styles.cardHeader}>
           <View style={styles.nomeContainer}>
-            <Ionicons name={item.icone as any} size={20} color="#555" style={styles.icone} />
+            <Ionicons name={(ICONES[item.chave] ?? 'build-outline') as any} size={20} color="#555" style={styles.icone} />
             <Text style={styles.nomePeca}>{item.nome}</Text>
           </View>
           <Text style={[styles.statusBadge, { color: cor, borderColor: cor }]}>
-            {status}
+            {texto}
           </Text>
         </View>
 
         <View style={styles.infoContainer}>
-          <Text style={styles.infoText}>Uso: {item.kmRodado} / {item.kmLimite} km</Text>
-          <Text style={[styles.porcentagemText, { color: cor }]}>{saudeRestante}% Vida útil</Text>
+          <Text style={styles.infoText}>{uso}</Text>
+          <Text style={[styles.porcentagemText, { color: cor }]}>{item.vidaRestante}% Vida útil</Text>
         </View>
 
-        
-      <View style={styles.barraFundo}>
-        <View 
-          style={[
-            styles.barraProgresso, 
-            { width: `${saudeRestante}%` as DimensionValue, backgroundColor: cor }
-          ]} 
+        <View style={styles.barraFundo}>
+          <View
+            style={[
+              styles.barraProgresso,
+              { width: `${item.vidaRestante}%` as DimensionValue, backgroundColor: cor }
+            ]}
           />
         </View>
+
+        {item.status !== 'bom' && (
+          <Text style={styles.sinaisText}>Sinais de desgaste: {item.sinaisDesgaste}</Text>
+        )}
       </View>
     );
   };
@@ -73,16 +118,24 @@ export default function Manutencao() {
     <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.title}>Status das Peças</Text>
-        <Text style={styles.subtitle}>Acompanhe o desgaste com base na quilometragem.</Text>
+        <Text style={styles.subtitle}>Desgaste calculado com base na quilometragem e nas faixas de vida útil de cada componente.</Text>
       </View>
 
-      <FlatList
-        data={pecasSimuladas}
-        keyExtractor={(item) => item.id}
-        renderItem={renderPeca}
-        contentContainerStyle={styles.listContainer}
-        showsVerticalScrollIndicator={false}
-      />
+      {carregando ? (
+        <View style={styles.centro}>
+          <ActivityIndicator size="large" color="#007AFF" />
+        </View>
+      ) : (
+        <FlatList
+          data={pecas}
+          keyExtractor={(item) => item.id}
+          renderItem={renderPeca}
+          contentContainerStyle={styles.listContainer}
+          showsVerticalScrollIndicator={false}
+          ListEmptyComponent={<Text style={styles.vazioText}>{erro || 'Nenhuma peça encontrada.'}</Text>}
+          ListFooterComponent={<View style={{ height: 90 }} />}
+        />
+      )}
     
       <View style={styles.footer}>
           <TouchableOpacity 
@@ -178,6 +231,23 @@ const styles = StyleSheet.create({
     backgroundColor: '#EAEAEA',
     borderRadius: 4,
     overflow: 'hidden',
+  },
+  sinaisText: {
+    fontSize: 12,
+    color: '#888',
+    marginTop: 10,
+    lineHeight: 17,
+  },
+  centro: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  vazioText: {
+    textAlign: 'center',
+    color: '#888',
+    marginTop: 40,
+    fontSize: 15,
   },
   barraProgresso: {
     height: '100%',
