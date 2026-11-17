@@ -37,24 +37,24 @@ model Bike {
   manutencoes  HistoricoManutencao[]
 }
 
-// Catálogo de referência: vida útil de cada tipo de componente (igual para todos os usuários)
 model ComponenteReferencia {
-  id             String  @id @default(auto()) @map("_id") @db.ObjectId
-  chave          String  @unique // "corrente", "cassete", "pneus"...
-  nome           String
-  ordem          Int     @default(0)
-  unidade        String // "km" ou "meses"
-  vidaMin        Float? // a partir daqui entra em "planejar troca"
-  vidaMax        Float? // a partir daqui é "troca urgente"
-  vidaMinMtb     Float? // faixas específicas quando a fonte separa por tipo de bike
-  vidaMaxMtb     Float?
-  vidaMinRoad    Float?
-  vidaMaxRoad    Float?
-  sinaisDesgaste String
-  observacao     String?
-  fonte          String
-  fonteUrl       String?
-  pecas          Peca[]
+  id               String            @id @default(auto()) @map("_id") @db.ObjectId
+  chave            String            @unique // "corrente", "cassete", "pneus"...
+  nome             String
+  ordem            Int               @default(0)
+  unidade          String            // "km" ou "meses"
+  vidaMin          Float?            // a partir daqui entra em "planejar troca"
+  vidaMax          Float?            // a partir daqui é "troca urgente"
+  vidaMinMtb       Float?            // faixas específicas quando a fonte separa por tipo de bike
+  vidaMaxMtb       Float?
+  vidaMinRoad      Float?
+  vidaMaxRoad      Float?
+  sinaisDesgaste   String
+  observacao       String?
+  fonte            String
+  fonteUrl         String?
+  pecas            Peca[]
+  mediasComunidade MediaComunidade[]
 }
 
 // Peça instalada em uma bike específica
@@ -88,4 +88,20 @@ model HistoricoManutencao {
   tipo      String // "rotina" ou "troca"
   bikeId    String   @db.ObjectId
   bike      Bike     @relation(fields: [bikeId], references: [id])
+}
+
+model MediaComunidade {
+  id            String               @id @default(auto()) @map("_id") @db.ObjectId
+  tipoBike      String               // "mtb" | "road" | "gravel" | "urbana" | "outra"
+  unidade       String               // "km" ou "meses"
+  somaDuracao   Float                @default(0)
+  totalTrocas   Int                  @default(0)
+  mediaVidaUtil Float                @default(0)
+  menorDuracao  Float?
+  maiorDuracao  Float?
+  atualizadoEm  DateTime             @updatedAt
+  componenteId  String               @db.ObjectId
+  componente    ComponenteReferencia @relation(fields: [componenteId], references: [id])
+
+  @@unique([componenteId, tipoBike])
 }

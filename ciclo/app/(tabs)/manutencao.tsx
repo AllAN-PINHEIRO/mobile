@@ -9,6 +9,17 @@ import { getBikeId } from '@/utils/bike';
 
 type StatusPeca = 'bom' | 'medio' | 'ruim';
 
+type DadosComunidade = {
+  tipoBike: string;
+  totalTrocas: number;
+  limiteMin: number;
+  limiteMax: number;
+  menorDuracao: number | null;
+  maiorDuracao: number | null;
+  vidaRestante: number;
+  status: StatusPeca;
+};
+
 type PecaStatus = {
   id: string;
   chave: string;
@@ -18,11 +29,11 @@ type PecaStatus = {
   limiteMax: number | null;
   vidaRestante: number;
   status: StatusPeca;
+  comunidade: DadosComunidade | null;
   sinaisDesgaste: string;
   observacao: string | null;
 };
 
-// Ícone de cada componente do catálogo
 const ICONES: Record<string, string> = {
   corrente: 'link-outline',
   cassete: 'cog-outline',
@@ -35,20 +46,27 @@ const ICONES: Record<string, string> = {
   quadro: 'cube-outline',
 };
 
-// Cor e texto de cada estado calculado pela API
 const ESTADOS: Record<StatusPeca, { cor: string; texto: string }> = {
   bom: { cor: '#34C759', texto: 'Em bom estado' },
   medio: { cor: '#FF9500', texto: 'Planejar troca' },
   ruim: { cor: '#FF3B30', texto: 'Troca urgente' },
 };
 
+const ROTULOS_TIPO: Record<string, string> = {
+  mtb: 'MTB',
+  road: 'Speed / Road',
+  gravel: 'Gravel',
+  urbana: 'Urbana',
+  outra: 'Outra',
+};
+
 export default function Manutencao() {
   const router = useRouter();
   const [pecas, setPecas] = useState<PecaStatus[]>([]);
+  const [tipoBike, setTipoBike] = useState<string>('outra');
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState('');
 
-  // Busca o estado das peças da bike ativa sempre que a tela volta ao foco
   const carregarPecas = useCallback(async () => {
     try {
       setErro('');
@@ -60,6 +78,7 @@ export default function Manutencao() {
       }
       const response = await axios.get(`${API_URL}/bikes/${bikeId}/pecas`);
       setPecas(response.data.pecas);
+      setTipoBike(response.data.bike?.tipo ?? 'outra');
     } catch (error: any) {
       console.log('Erro ao carregar peças:', error?.message);
       setErro('Não foi possível carregar o estado das peças.');
@@ -77,9 +96,13 @@ export default function Manutencao() {
   const renderPeca = ({ item }: { item: PecaStatus }) => {
     const { cor, texto } = ESTADOS[item.status];
     const unidade = item.unidade === 'km' ? 'km' : 'meses';
-    const uso = item.limiteMax != null
-      ? `Uso: ${Math.round(item.desgaste)} / ${Math.round(item.limiteMax)} ${unidade}`
+    const usoPadrao = item.limiteMax != null
+      ? `Padrão: uso ${Math.round(item.desgaste)} / ${Math.round(item.limiteMax)} ${unidade}`
       : `Uso: ${Math.round(item.desgaste)} ${unidade}`;
+
+    const com = item.comunidade;
+    const estadoCom = com ? ESTADOS[com.status] : null;
+    const rotuloTipo = ROTULOS_TIPO[tipoBike] ?? tipoBike.toUpperCase();
 
     return (
       <View style={styles.card}>
@@ -93,8 +116,9 @@ export default function Manutencao() {
           </Text>
         </View>
 
+        {/* 1. Vida útil pelo Padrão Oficial */}
         <View style={styles.infoContainer}>
-          <Text style={styles.infoText}>{uso}</Text>
+          <Text style={styles.infoText}>{usoPadrao}</Text>
           <Text style={[styles.porcentagemText, { color: cor }]}>{item.vidaRestante}% Vida útil</Text>
         </View>
 
@@ -107,7 +131,51 @@ export default function Manutencao() {
           />
         </View>
 
-        {item.status !== 'bom' && (
+        {/* 2. Vida útil pela Média Dinâmica da Comunidade */}
+        <View style={styles.comunidadeContainer}>
+          {com && estadoCom ? (
+            <>
+              <View style={styles.comunidadeHeader}>
+                <View style={styles.comunidadeTituloRow}>
+                  <Ionicons name="people-outline" size={15} color="#007AFF" />
+                  <Text style={styles.comunidadeTitulo}>
+                    Comunidade ({rotuloTipo} · {com.totalTrocas} {com.totalTrocas === 1 ? 'troca' : 'trocas'})
+                  </Text>
+                </View>
+                <Text style={[styles.comunidadeStatus, { color: estadoCom.cor }]}>
+                  {estadoCom.texto}
+                </Text>
+              </View>
+
+              <View style={styles.infoContainer}>
+                <Text style={styles.infoText}>
+                  Uso: {Math.round(item.desgaste)} / Média {Math.round(com.limiteMax)} {unidade}
+                </Text>
+                <Text style={[styles.porcentagemText, { color: estadoCom.cor }]}>
+                  {com.vidaRestante}% Vida útil
+                </Text>
+              </View>
+
+              <View style={styles.barraFundo}>
+                <View
+                  style={[
+                    styles.barraProgresso,
+                    { width: `${com.vidaRestante}%` as DimensionValue, backgroundColor: estadoCom.cor }
+                  ]}
+                />
+              </View>
+            </>
+          ) : (
+            <View style={styles.comunidadeVaziaRow}>
+              <Ionicons name="people-outline" size={15} color="#888" />
+              <Text style={styles.comunidadeVaziaText}>
+                Comunidade ({rotuloTipo}): sem trocas registradas ainda
+              </Text>
+            </View>
+          )}
+        </View>
+
+        {(item.status !== 'bom' || com?.status === 'medio' || com?.status === 'ruim') && (
           <Text style={styles.sinaisText}>Sinais de desgaste: {item.sinaisDesgaste}</Text>
         )}
       </View>
@@ -118,7 +186,9 @@ export default function Manutencao() {
     <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.title}>Status das Peças</Text>
-        <Text style={styles.subtitle}>Desgaste calculado com base na quilometragem e nas faixas de vida útil de cada componente.</Text>
+        <Text style={styles.subtitle}>
+          Compare o desgaste pela referência oficial e pela média real da comunidade ({ROTULOS_TIPO[tipoBike] ?? tipoBike}).
+        </Text>
       </View>
 
       {carregando ? (
@@ -136,16 +206,16 @@ export default function Manutencao() {
           ListFooterComponent={<View style={{ height: 90 }} />}
         />
       )}
-    
+
       <View style={styles.footer}>
-          <TouchableOpacity 
-            style={styles.addButton}
-            onPress={() => router.push('/cadastro-manutencao' as any)}
-            >
-            <Ionicons name="add-circle-outline" size={24} color="#fff" style={{ marginRight: 8 }} />
-            <Text style={styles.addButtonText}>Registrar Manutenção</Text>
-          </TouchableOpacity>
-        </View>
+        <TouchableOpacity
+          style={styles.addButton}
+          onPress={() => router.push('/cadastro-manutencao' as any)}
+        >
+          <Ionicons name="add-circle-outline" size={24} color="#fff" style={{ marginRight: 8 }} />
+          <Text style={styles.addButtonText}>Registrar Manutenção</Text>
+        </TouchableOpacity>
+      </View>
     </View>
   );
 }
@@ -196,6 +266,8 @@ const styles = StyleSheet.create({
   nomeContainer: {
     flexDirection: 'row',
     alignItems: 'center',
+    flex: 1,
+    paddingRight: 8,
   },
   icone: {
     marginRight: 8,
@@ -216,7 +288,7 @@ const styles = StyleSheet.create({
   infoContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 8,
+    marginBottom: 6,
   },
   infoText: {
     fontSize: 13,
@@ -231,6 +303,46 @@ const styles = StyleSheet.create({
     backgroundColor: '#EAEAEA',
     borderRadius: 4,
     overflow: 'hidden',
+  },
+  barraProgresso: {
+    height: '100%',
+    borderRadius: 4,
+  },
+  comunidadeContainer: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#F0F2F5',
+  },
+  comunidadeHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  comunidadeTituloRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  comunidadeTitulo: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#007AFF',
+  },
+  comunidadeStatus: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  comunidadeVaziaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  comunidadeVaziaText: {
+    fontSize: 12,
+    color: '#888',
+    fontStyle: 'italic',
   },
   sinaisText: {
     fontSize: 12,
@@ -249,17 +361,13 @@ const styles = StyleSheet.create({
     marginTop: 40,
     fontSize: 15,
   },
-  barraProgresso: {
-    height: '100%',
-    borderRadius: 4,
-  },
-      footer: {
+  footer: {
     position: 'absolute',
     bottom: 30,
     left: 20,
     right: 20,
   },
-      addButton: {
+  addButton: {
     flexDirection: 'row',
     backgroundColor: '#007AFF',
     paddingVertical: 16,
@@ -272,7 +380,7 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 5,
   },
-    addButtonText: {
+  addButtonText: {
     color: '#fff',
     fontSize: 18,
     fontWeight: 'bold',

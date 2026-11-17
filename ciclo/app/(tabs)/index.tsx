@@ -6,27 +6,74 @@ import axios from 'axios';
 
 import { API_URL } from '@/constants/api';
 import { getBikeId } from '@/utils/bike';
+import { CardSaudeBike } from '@/components/CardSaudeBike';
+
+type StatusPeca = 'bom' | 'medio' | 'ruim';
 
 type PecaStatus = {
   id: string;
   nome: string;
   vidaRestante: number;
-  status: 'bom' | 'medio' | 'ruim';
+  status: StatusPeca;
+  comunidade: {
+    tipoBike: string;
+    totalTrocas: number;
+    vidaRestante: number;
+    status: StatusPeca;
+  } | null;
 };
 
 type Resumo = {
   apelido: string;
+  tipo: string;
   kmAtual: number;
   pecas: PecaStatus[];
   kmUltimaManutencao: number | null;
 };
+
+const ROTULOS_TIPO: Record<string, string> = {
+  mtb: 'MTB',
+  road: 'Speed / Road',
+  gravel: 'Gravel',
+  urbana: 'Urbana',
+  outra: 'Outra',
+};
+
+function calcularIndicadorSaude(
+  itens: { nome: string; vidaRestante: number; status: StatusPeca }[]
+) {
+  const media =
+    itens.length > 0
+      ? itens.reduce((soma, p) => soma + p.vidaRestante, 0) / itens.length
+      : 100;
+
+  const urgentes = itens.filter((p) => p.status === 'ruim');
+  const emAtencao = itens.filter((p) => p.status === 'medio');
+
+  let corStatus = '#34C759';
+  let textoStatus = 'Bike em Ótimo Estado';
+
+  if (urgentes.length > 0) {
+    corStatus = '#FF3B30';
+    textoStatus = 'Manutenção Urgente';
+  } else if (emAtencao.length > 0) {
+    corStatus = '#FF9500';
+    textoStatus = 'Atenção Necessária';
+  }
+
+  return {
+    media,
+    corStatus,
+    textoStatus,
+    pecasAtencao: [...urgentes, ...emAtencao].map((p) => p.nome),
+  };
+}
 
 export default function Home() {
   const [resumo, setResumo] = useState<Resumo | null>(null);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState('');
 
-  // Busca o estado das peças e o histórico da bike ativa sempre que a Home volta ao foco
   const carregarResumo = useCallback(async () => {
     try {
       setErro('');
@@ -45,9 +92,9 @@ export default function Home() {
       const historico = historicoRes.data as { km: number }[];
       setResumo({
         apelido: pecasRes.data.bike.apelido,
+        tipo: pecasRes.data.bike.tipo ?? 'outra',
         kmAtual: pecasRes.data.bike.kmAtual,
         pecas: pecasRes.data.pecas,
-        // o histórico já vem ordenado da manutenção mais recente para a mais antiga
         kmUltimaManutencao: historico.length > 0 ? historico[0].km : null,
       });
     } catch (error: any) {
@@ -80,29 +127,22 @@ export default function Home() {
     );
   }
 
-  // Saúde geral: média da vida útil restante de todas as peças
-  const saudeMedia =
-    resumo.pecas.length > 0
-      ? resumo.pecas.reduce((soma, p) => soma + p.vidaRestante, 0) / resumo.pecas.length
-      : 100;
-  const saudeExibicao = saudeMedia.toFixed(0);
+  const rotuloTipo = ROTULOS_TIPO[resumo.tipo] ?? resumo.tipo.toUpperCase();
 
-  // A cor e o texto seguem a pior peça: uma corrente no limite não pode ser escondida pela média
-  const urgentes = resumo.pecas.filter((p) => p.status === 'ruim');
-  const emAtencao = resumo.pecas.filter((p) => p.status === 'medio');
+  // 1. Saúde Geral Padrão (Referência Oficial)
+  const saudePadrao = calcularIndicadorSaude(resumo.pecas);
 
-  let corStatus = '#34C759';
-  let textoStatus = 'Bike em Ótimo Estado';
+  // 2. Saúde Geral Comunidade (Média dinâmica para o tipo desta bike)
+  const itensComunidade = resumo.pecas
+    .filter((p) => p.comunidade !== null)
+    .map((p) => ({
+      nome: p.nome,
+      vidaRestante: p.comunidade!.vidaRestante,
+      status: p.comunidade!.status,
+    }));
 
-  if (urgentes.length > 0) {
-    corStatus = '#FF3B30';
-    textoStatus = 'Manutenção Urgente';
-  } else if (emAtencao.length > 0) {
-    corStatus = '#FF9500';
-    textoStatus = 'Atenção Necessária';
-  }
-
-  const precisamAtencao = [...urgentes, ...emAtencao].map((p) => p.nome);
+  const temDadosComunidade = itensComunidade.length > 0;
+  const saudeComunidade = temDadosComunidade ? calcularIndicadorSaude(itensComunidade) : null;
 
   const odometroTotal = Math.round(resumo.kmAtual);
   const kmDesdeUltimaManutencao =
@@ -114,39 +154,51 @@ export default function Home() {
     <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
       <View style={styles.header}>
         <Text style={styles.greeting}>Olá</Text>
-        <Text style={styles.subtitle}>{resumo.apelido}</Text>
+        <Text style={styles.subtitle}>{resumo.apelido} · {rotuloTipo}</Text>
       </View>
 
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Saúde Geral da Bike</Text>
-        <View style={styles.healthContainer}>
-          <View style={[styles.healthCircle, { borderColor: corStatus }]}>
-            <Text style={[styles.healthPercentage, { color: corStatus }]}>
-              {saudeExibicao}%
-            </Text>
-          </View>
-          <Text style={[styles.healthStatusText, { color: corStatus }]}>
-            {textoStatus}
-          </Text>
-          {precisamAtencao.length > 0 && (
-            <Text style={styles.atencaoText}>Peças para acompanhar: {precisamAtencao.join(', ')}</Text>
-          )}
-        </View>
-      </View>
+      {/* Card 1: Saúde Geral Padrão */}
+      <CardSaudeBike
+        titulo="Saúde Geral da Bike"
+        subtituloOrigem="Padrão"
+        porcentagem={saudePadrao.media}
+        corStatus={saudePadrao.corStatus}
+        textoStatus={saudePadrao.textoStatus}
+        pecasAtencao={saudePadrao.pecasAtencao}
+      />
+
+      {/* Card 2: Saúde Geral Comunidade */}
+      <CardSaudeBike
+        titulo="Saúde Geral · Comunidade"
+        subtituloOrigem={rotuloTipo}
+        porcentagem={saudeComunidade ? saudeComunidade.media : null}
+        corStatus={saudeComunidade ? saudeComunidade.corStatus : '#8E8E93'}
+        textoStatus={
+          saudeComunidade
+            ? saudeComunidade.textoStatus
+            : 'Sem dados da comunidade ainda'
+        }
+        pecasAtencao={saudeComunidade ? saudeComunidade.pecasAtencao : []}
+        rodapeInfo={
+          temDadosComunidade
+            ? `Baseado em ${itensComunidade.length} de ${resumo.pecas.length} peças com trocas registradas na comunidade`
+            : `Registre trocas de peças para alimentar a média de bikes ${rotuloTipo}`
+        }
+      />
 
       {/* Card de Odômetro */}
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Odômetro</Text>
-        
+
         <View style={styles.odoRow}>
           <View style={styles.odoItem}>
             <Ionicons name="speedometer-outline" size={32} color="#007AFF" />
             <Text style={styles.odoValue}>{odometroTotal} km</Text>
             <Text style={styles.odoLabel}>Total Rodado</Text>
           </View>
-          
+
           <View style={styles.odoDivider} />
-          
+
           <View style={styles.odoItem}>
             <Ionicons name="build-outline" size={32} color="#FF9500" />
             <Text style={styles.odoValue}>{kmDesdeUltimaManutencao != null ? `${kmDesdeUltimaManutencao} km` : '—'}</Text>
@@ -154,7 +206,6 @@ export default function Home() {
           </View>
         </View>
       </View>
-
     </ScrollView>
   );
 }
@@ -182,7 +233,7 @@ const styles = StyleSheet.create({
   card: {
     backgroundColor: '#fff',
     marginHorizontal: 20,
-    marginBottom: 20,
+    marginBottom: 30,
     borderRadius: 16,
     padding: 20,
     shadowColor: '#000',
@@ -196,33 +247,6 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#333',
     marginBottom: 15,
-  },
-  healthContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  healthCircle: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    borderWidth: 6,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 10,
-  },
-  healthPercentage: {
-    fontSize: 32,
-    fontWeight: 'bold',
-  },
-  healthStatusText: {
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  atencaoText: {
-    fontSize: 13,
-    color: '#666',
-    textAlign: 'center',
-    marginTop: 8,
   },
   odoRow: {
     flexDirection: 'row',
