@@ -1,7 +1,7 @@
 import React, { useCallback, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, ActivityIndicator,TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect,useRouter } from 'expo-router';
 import axios from 'axios';
 
 import { API_URL } from '@/constants/api';
@@ -70,6 +70,7 @@ function calcularIndicadorSaude(
 }
 
 export default function Home() {
+  const router = useRouter();
   const [resumo, setResumo] = useState<Resumo | null>(null);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState('');
@@ -144,11 +145,11 @@ export default function Home() {
   const temDadosComunidade = itensComunidade.length > 0;
   const saudeComunidade = temDadosComunidade ? calcularIndicadorSaude(itensComunidade) : null;
 
-  const odometroTotal = Math.round(resumo.kmAtual);
+  const odometroTotal = Number(resumo.kmAtual.toFixed(2));
   const kmDesdeUltimaManutencao =
-    resumo.kmUltimaManutencao != null
-      ? Math.max(0, Math.round(resumo.kmAtual - resumo.kmUltimaManutencao))
-      : null;
+  resumo.kmUltimaManutencao != null
+    ? Math.max(0, Number((resumo.kmAtual - resumo.kmUltimaManutencao).toFixed(2)))
+    : null;
 
   return (
     <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
@@ -189,8 +190,16 @@ export default function Home() {
       {/* Card de Odômetro */}
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Odômetro</Text>
+        <TouchableOpacity
+            style={styles.pedalButton}
+            onPress={() => router.push('/pedal' as any)}
+          >
+            <Ionicons name="navigate-outline" size={20} color="#fff" style={{ marginRight: 8 }} />
+            <Text style={styles.pedalButtonText}>Iniciar Pedal (GPS)</Text>
+          </TouchableOpacity>
 
         <View style={styles.odoRow}>
+          
           <View style={styles.odoItem}>
             <Ionicons name="speedometer-outline" size={32} color="#007AFF" />
             <Text style={styles.odoValue}>{odometroTotal} km</Text>
@@ -204,7 +213,9 @@ export default function Home() {
             <Text style={styles.odoValue}>{kmDesdeUltimaManutencao != null ? `${kmDesdeUltimaManutencao} km` : '—'}</Text>
             <Text style={styles.odoLabel}>{kmDesdeUltimaManutencao != null ? 'Desde a última revisão' : 'Nenhuma revisão registrada'}</Text>
           </View>
+          
         </View>
+        
       </View>
     </ScrollView>
   );
@@ -275,4 +286,17 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 4,
   },
+  pedalButton: { 
+    flexDirection: 'row', 
+    backgroundColor: '#34C759', 
+    paddingVertical: 12, 
+    borderRadius: 10, 
+    justifyContent: 'center', 
+    alignItems: 'center', 
+    marginTop: 18 },
+  
+  pedalButtonText: { 
+    color: '#fff', 
+    fontWeight: 'bold', 
+    fontSize: 15 }
 });
